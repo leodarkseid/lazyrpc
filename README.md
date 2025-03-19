@@ -1,8 +1,8 @@
-# RPC Class Documentation
+# LAZY RPC DOCUMENTATION
 
 ## Overview
 
-The `RPC` class is designed to manage and validate Remote Procedure Call (RPC) URLs for blockchain interactions. It supports both HTTP and WebSocket (WS) calls, failure tracking, retry logic, and automatic validation of endpoints.
+LAZY RPC is designed to manage and validate Remote Procedure Call (RPC) URLs for blockchain interactions. It supports both HTTP and WebSocket (WS) calls, failure tracking, retry logic, and automatic validation of endpoints.
 
 ## Features
 
@@ -18,6 +18,12 @@ Ensure you have Node.js installed, then import the `RPC` class into your project
 
 ```typescript
 import { RPC } from "./rpc";
+```
+
+or
+
+```typescript
+const RPC = require("./rpc");
 ```
 
 ## Usage
