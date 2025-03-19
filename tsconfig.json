@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ESNext",
+    "declaration": true,
+    "resolveJsonModule": true,
+    "strict": true
+  },
+  "include": ["src/**/*", "rpcList.json"],
+  "exclude": ["node_modules", "dist"]
+}
