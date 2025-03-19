@@ -7,6 +7,10 @@
     "test": "jest",
     "build": "tsup src/index.ts --format cjs,esm --dts --clean --minify  && cp src/rpcList.min.json dist/"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leodarkseid/lazyrpc.git"
+  },
   "types": "./dist/index.d.ts",
   "exports": {
     "import": "./dist/index.mjs",
@@ -21,7 +25,11 @@
     "url",
     "blockchain"
   ],
-  "author": "leo",
+  "author": {
+    "email": "leodarkseid@gmail.com",
+    "name": "Leo",
+    "url": "https://badmuskolade.com"
+  },
   "license": "MIT",
   "description": "A simple tool that helps that helps to get fresh and functional url rpcs for evm chains, it handles rpc failures and retrials, it also support both Https and Websocket",
   "files": [
