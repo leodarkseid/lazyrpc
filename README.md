@@ -76,7 +76,10 @@ This repo will maintain a list of public rpc, so it can simply be copied.
 
 ### `getRpc(type: "ws" | "https"): string`
 
-Retrieves a valid RPC URL of the specified type.
+Retrieves a valid RPC URL of the specified type instantly.
+### `getRpcAsync(type: "ws" | "https"): string`
+
+Retrieves a valid RPC URL of the specified type after running the internal Initialiazation, i.e. after finding valid RPCs
 
 ### `drop(url: string): void`
 

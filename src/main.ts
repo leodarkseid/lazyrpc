@@ -130,6 +130,17 @@ export class RPC {
   }
 
   /**
+   * Retrieves a valid RPC URL based on type (HTTP or WebSocket) asychronously.
+   * @param type - The type of RPC: "ws" or "https".
+   * @returns A valid RPC URL Promise.
+   * @throws Error if no valid URLs are found.
+   */
+  public async getRpcAsync(type: "ws" | "https"): Promise<string> {
+    await this.intialize();
+    return this.getRpc(type);
+  }
+
+  /**
    * Initializes RPC lists from the local file, only at Class initialization.
    * @returns void
    */
