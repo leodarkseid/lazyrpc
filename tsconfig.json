@@ -6,7 +6,8 @@
     "target": "ESNext",
     "declaration": true,
     "resolveJsonModule": true,
-    "strict": true
+    "strict": true,
+    "isolatedModules": true
   },
   "include": ["src/**/*", "rpcList.json"],
   "exclude": ["node_modules", "dist"]

@@ -1,6 +1,6 @@
 {
   "name": "lazy-rpc",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "scripts": {
@@ -23,7 +23,17 @@
     "https",
     "websocket",
     "url",
-    "blockchain"
+    "blockchain",
+    "polygon",
+    "arbitrum",
+    "optimism",
+    "base",
+    "bsc",
+    "avalanche",
+    "load-balancing",
+    "failover",
+    "retry-logic",
+    "typescript"
   ],
   "author": {
     "email": "leodarkseid@gmail.com",
@@ -31,7 +41,7 @@
     "url": "https://badmuskolade.com"
   },
   "license": "MIT",
-  "description": "A simple tool that helps that helps to get fresh and functional url rpcs for evm chains, it handles rpc failures and retrials, it also support both Https and Websocket",
+  "description": "Production-ready RPC management library with load balancing, exponential backoff, and support for 15+ EVM chains. Features TypeScript-first design, WebSocket support, and intelligent failure handling.",
   "files": [
     "/dist"
   ],
