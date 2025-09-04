@@ -3,3 +3,13 @@ node_modules
 /dist
 /src/run.ts
 package-lock.json
+demo.mjs
+*.log
+.DS_Store
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+coverage/
+.nyc_output/
