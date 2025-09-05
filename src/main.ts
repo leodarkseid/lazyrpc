@@ -41,6 +41,8 @@ export class RPC {
   private wsRoundRobinIndex: number = 0;
   /** Base backoff delay in milliseconds */
   private baseBackoffDelay: number = 1000;
+  /** Timer for periodic initialization */
+  private initializationTimer?: NodeJS.Timeout;
 
   /**
    * Constructor initializes RPC class with configuration options.
@@ -167,6 +169,10 @@ export class RPC {
    * @throws Error if no valid URLs are found.
    */
   public getRpc(type: RPCType): string {
+    if (type !== "https" && type !== "ws") {
+      throw new Error(`Invalid RPC type: ${type}. Must be 'https' or 'ws'.`);
+    }
+    
     const endpoints = type === "https" ? this.validRPCs : this.validWSRPCs;
     
     if (endpoints.length === 0) {
@@ -277,7 +283,10 @@ export class RPC {
     }
     
     // Schedule next initialization
-    setTimeout(() => this.intialize(), this.ttl * 1000);
+    if (this.initializationTimer) {
+      clearTimeout(this.initializationTimer);
+    }
+    this.initializationTimer = setTimeout(() => this.intialize(), this.ttl * 1000);
   }
 
   /**
@@ -336,6 +345,16 @@ export class RPC {
     this.failedURL.clear();
     if (this.log) {
       console.log("Cleared all failed URL records");
+    }
+  }
+
+  /**
+   * Clean up resources and stop timers (useful for testing).
+   */
+  public cleanup(): void {
+    if (this.initializationTimer) {
+      clearTimeout(this.initializationTimer);
+      this.initializationTimer = undefined;
     }
   }
 
