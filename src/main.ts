@@ -1,13 +1,14 @@
 import { assert } from "./tools";
 import * as fs from "fs";
 import * as path from "path";
-import { 
-  RPCConfig, 
-  RPCEndpoint, 
-  FailedURLInfo, 
-  RPCCallResult, 
+import {
+  RPCConfig,
+  RPCEndpoint,
+  FailedURLInfo,
+  RPCCallResult,
   RPCType,
-  LoadBalancingStrategy 
+  LoadBalancingStrategy,
+  FailureStats
 } from "./types";
 
 /**
@@ -41,6 +42,8 @@ export class RPC {
   private wsRoundRobinIndex: number = 0;
   /** Base backoff delay in milliseconds */
   private baseBackoffDelay: number = 1000;
+  /** Handle for the periodic refresh timer */
+  private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   /**
    * Constructor initializes RPC class with configuration options.
@@ -55,16 +58,16 @@ export class RPC {
     this.drop_ = this.drop_.bind(this);
     this.drop = this.drop.bind(this);
     this.getRpc = this.getRpc.bind(this);
-    
+
     this.chainId = config.chainId;
-    this.ttl = config.ttl || this.ttl;
-    this.maxRetry = config.maxRetry || this.maxRetry;
-    this.log = config.log || this.log;
-    this.pathToRpcJson = config.pathToRpcJson || this.pathToRpcJson;
-    this.loadBalancing = config.loadBalancing || this.loadBalancing;
+    this.ttl = config.ttl ?? this.ttl;
+    this.maxRetry = config.maxRetry ?? this.maxRetry;
+    this.log = config.log ?? this.log;
+    this.pathToRpcJson = config.pathToRpcJson ?? this.pathToRpcJson;
+    this.loadBalancing = config.loadBalancing ?? this.loadBalancing;
 
     this.init();
-    this.intialize();
+    this.initialize();
   }
 
   /**
@@ -75,7 +78,7 @@ export class RPC {
     if (!config.chainId) {
       throw new Error("chainId is required");
     }
-    
+
     if (!config.chainId.startsWith("0x")) {
       throw new Error("chainId must be in hex format (e.g., '0x0001')");
     }
@@ -105,7 +108,7 @@ export class RPC {
           ? this.pathToRpcJson
           : path.join(__dirname, "rpcList.min.json");
       let data: string | null = await fs.promises.readFile(filePath, "utf-8");
-      let chainList = JSON.parse(data);
+      let chainList;
       try {
         chainList = JSON.parse(data);
       } catch (error: any) {
@@ -117,7 +120,7 @@ export class RPC {
       }
       data = null;
       chainList = null;
-      return result || [];
+      return result;
     } catch (error: any) {
       throw new Error(`Error fetching chain RPCs: ${error.message}`);
     }
@@ -128,7 +131,7 @@ export class RPC {
    * @param url - The RPC URL to be dropped.
    */
   public drop(url: string) {
-    this.drop_(url, this.maxRetry);
+    this.drop_(url, 1);
   }
 
   /**
@@ -142,13 +145,13 @@ export class RPC {
       time: Date.now(),
       nextRetry: Date.now()
     };
-    
+
     const newCount = prevFailures.count + count;
     const backoffDelay = Math.min(
-      this.baseBackoffDelay * Math.pow(2, newCount - 1), 
+      this.baseBackoffDelay * Math.pow(2, newCount - 1),
       60000 // Max 1 minute backoff
     );
-    
+
     this.failedURL.set(url, {
       count: newCount,
       time: Date.now(),
@@ -167,8 +170,12 @@ export class RPC {
    * @throws Error if no valid URLs are found.
    */
   public getRpc(type: RPCType): string {
+    if (type !== "https" && type !== "ws") {
+      throw new Error(`Invalid RPC type: "${type}". Must be "ws" or "https"`);
+    }
+
     const endpoints = type === "https" ? this.validRPCs : this.validWSRPCs;
-    
+
     if (endpoints.length === 0) {
       throw new Error(`No valid ${type} URLs found`);
     }
@@ -179,7 +186,7 @@ export class RPC {
       case "fastest":
         selectedEndpoint = endpoints[0]; // Already sorted by response time
         break;
-      
+
       case "round-robin":
         if (type === "https") {
           selectedEndpoint = endpoints[this.httpRoundRobinIndex % endpoints.length];
@@ -189,12 +196,12 @@ export class RPC {
           this.wsRoundRobinIndex = (this.wsRoundRobinIndex + 1) % endpoints.length;
         }
         break;
-      
+
       case "random":
         const randomIndex = Math.floor(Math.random() * endpoints.length);
         selectedEndpoint = endpoints[randomIndex];
         break;
-      
+
       default:
         selectedEndpoint = endpoints[0];
     }
@@ -209,7 +216,7 @@ export class RPC {
    * @throws Error if no valid URLs are found.
    */
   public async getRpcAsync(type: RPCType): Promise<string> {
-    await this.intialize();
+    await this.initialize();
     return this.getRpc(type);
   }
 
@@ -236,48 +243,71 @@ export class RPC {
   /**
    * Fetches RPC URLs from the chain list and initializes them.
    */
-  private async intialize(): Promise<void> {
+  private async initialize(): Promise<void> {
     try {
       const http = await this.getChain(this.chainId.slice(1));
       const ws = await this.getChain(`${this.chainId.slice(1)}_WS`);
-      
-      const all = await Promise.allSettled([
-        ...http.map(
-          async (h: string) => await this.run(this.httpCall, h, "https")
-        ),
-        ...ws.map(async (w: string) => await this.run(this.wsCall, w, "ws")),
-      ]);
 
-      this.validRPCs = [];
-      this.validWSRPCs = [];
-      
-      all.forEach((result) => {
-        if (result.status === "fulfilled") {
-          if (result.value.type === "ws") {
-            this.validWSRPCs.push({ url: result.value.url, time: result.value.time });
-          } else if (result.value.type === "https") {
-            this.validRPCs.push({ url: result.value.url, time: result.value.time });
+      // Throttle: validate in batches to avoid overwhelming the network
+      const BATCH_SIZE = 10;
+      const allUrls = [
+        ...http.map((h: string) => ({ url: h, type: "https" as RPCType })),
+        ...ws.map((w: string) => ({ url: w, type: "ws" as RPCType })),
+      ];
+
+      const results: RPCCallResult[] = [];
+      for (let i = 0; i < allUrls.length; i += BATCH_SIZE) {
+        const batch = allUrls.slice(i, i + BATCH_SIZE);
+        const batchResults = await Promise.allSettled(
+          batch.map(({ url, type }) =>
+            this.run(type === "https" ? this.httpCall : this.wsCall, url, type)
+          )
+        );
+        for (const result of batchResults) {
+          if (result.status === "fulfilled") {
+            results.push(result.value);
+          } else if (this.log) {
+            console.warn("RPC validation failed:", result.reason);
           }
-        } else if (this.log) {
-          console.warn("RPC validation failed:", result.reason);
         }
-      });
-      
-      // Sort by response time (fastest first)
-      this.validRPCs = this.validRPCs.sort((a, b) => a.time - b.time);
-      this.validWSRPCs = this.validWSRPCs.sort((a, b) => a.time - b.time);
-      
+      }
+
+      const newHTTP = results
+        .filter((r) => r.type === "https")
+        .sort((a, b) => a.time - b.time)
+        .map((r) => ({ url: r.url, time: r.time }));
+
+      const newWS = results
+        .filter((r) => r.type === "ws")
+        .sort((a, b) => a.time - b.time)
+        .map((r) => ({ url: r.url, time: r.time }));
+
+      // Only replace the lists if we got at least some successes.
+      // This prevents total data loss when network is temporarily down.
+      if (newHTTP.length > 0) {
+        this.validRPCs = newHTTP;
+      }
+      if (newWS.length > 0) {
+        this.validWSRPCs = newWS;
+      }
+
       if (this.log) {
-        console.log(`Validated ${this.validRPCs.length} HTTP and ${this.validWSRPCs.length} WebSocket RPCs`);
+        console.log(`Validated ${newHTTP.length} HTTP and ${newWS.length} WebSocket RPCs`);
       }
     } catch (error) {
       if (this.log) {
         console.error("Error during RPC initialization:", error);
       }
     }
-    
-    // Schedule next initialization
-    setTimeout(() => this.intialize(), this.ttl * 1000);
+
+    // Schedule next initialization (clear any previous timer first)
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+    }
+    this.refreshTimer = setTimeout(() => this.initialize(), this.ttl * 1000);
+    if (this.refreshTimer && typeof this.refreshTimer === 'object' && 'unref' in this.refreshTimer) {
+      this.refreshTimer.unref();
+    }
   }
 
   /**
@@ -302,10 +332,10 @@ export class RPC {
    * Gets statistics about failed URLs.
    * @returns Object containing failure statistics.
    */
-  public getFailureStats(): { totalFailed: number; inBackoff: number; overMaxRetries: number } {
+  public getFailureStats(): FailureStats {
     let inBackoff = 0;
     let overMaxRetries = 0;
-    
+
     this.failedURL.forEach((info) => {
       if (info.count >= this.maxRetry) {
         overMaxRetries++;
@@ -326,7 +356,24 @@ export class RPC {
    * @returns Promise that resolves when refresh is complete.
    */
   public async refresh(): Promise<void> {
-    await this.intialize();
+    await this.initialize();
+  }
+
+  /**
+   * Destroys the RPC instance, clearing all timers and preventing memory leaks.
+   * Should be called when the instance is no longer needed.
+   */
+  public destroy(): void {
+    if (this.refreshTimer) {
+      clearTimeout(this.refreshTimer);
+      this.refreshTimer = null;
+    }
+    this.validRPCs = [];
+    this.validWSRPCs = [];
+    this.failedURL.clear();
+    if (this.log) {
+      console.log("RPC instance destroyed");
+    }
   }
 
   /**
@@ -356,6 +403,9 @@ export class RPC {
         throw new Error("Invalid HTTP URL");
       }
 
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
+
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -365,8 +415,11 @@ export class RPC {
           params: [],
           id,
         }),
+        signal: controller.signal,
       });
-      
+
+      clearTimeout(timeout);
+
       assert(response.ok, "Invalid HTTP Response");
       const data = await response.json();
       assert(data.id === id, "ID Mismatch");
@@ -399,7 +452,7 @@ export class RPC {
 
         const ws = new WebSocket(url);
         let isResolved = false;
-        
+
         // Timeout to prevent hanging connections
         const timeout = setTimeout(() => {
           if (!isResolved) {
@@ -425,7 +478,7 @@ export class RPC {
           try {
             const data = JSON.parse(event.data);
             assert(data.id === id, "WebSocket response ID mismatch");
-            
+
             if (!isResolved) {
               isResolved = true;
               clearTimeout(timeout);
@@ -515,7 +568,7 @@ export class RPC {
     this.id++;
     const id = this.id;
     const start = performance.now();
-    
+
     try {
       await fn(url, id);
       const stop = performance.now();

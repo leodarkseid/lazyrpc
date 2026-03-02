@@ -1,0 +1,10 @@
+{
+    "x0001": [
+        "https://custom-rpc-one.example.com",
+        "https://custom-rpc-two.example.com",
+        "https://custom-rpc-three.example.com"
+    ],
+    "x0001_WS": [
+        "wss://custom-ws-one.example.com"
+    ]
+}

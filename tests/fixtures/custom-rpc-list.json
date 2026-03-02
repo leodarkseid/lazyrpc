@@ -1,0 +1,9 @@
+{
+    "x0001": [
+        "https://ethereum-rpc.publicnode.com",
+        "https://1rpc.io/eth"
+    ],
+    "x0001_WS": [
+        "wss://ethereum-rpc.publicnode.com"
+    ]
+}

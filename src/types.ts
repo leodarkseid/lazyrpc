@@ -56,6 +56,18 @@ export interface RPCCallResult {
 export type LoadBalancingStrategy = "fastest" | "round-robin" | "random";
 
 /**
+ * Failure statistics returned by getFailureStats()
+ */
+export interface FailureStats {
+  /** Total number of URLs that have failed at least once */
+  totalFailed: number;
+  /** Number of URLs currently in backoff period */
+  inBackoff: number;
+  /** Number of URLs that have exceeded max retries */
+  overMaxRetries: number;
+}
+
+/**
  * RPC type for method calls
  */
 export type RPCType = "ws" | "https";
