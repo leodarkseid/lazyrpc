@@ -1,22 +1,26 @@
-import { RPC, RPCConfig } from "../src/index";
+import { RPC } from "../src/index";
 import * as fs from "fs";
 
-// Mock globals at module level
+// ---------------------------------------------------------------------------
+// undici fetch mock — intercepts all internal HTTP validation calls
+// ---------------------------------------------------------------------------
 const mockFetch = jest.fn(async (_url: string, options?: any) => {
-  // Parse the request to return matching id for assertion
   let id = 1;
   try {
-    if (options?.body) {
-      const body = JSON.parse(options.body);
-      id = body.id;
-    }
+    if (options?.body) id = JSON.parse(options.body).id;
   } catch { }
-  return Promise.resolve({
-    ok: true,
-    json: async () => ({ jsonrpc: "2.0", id, result: "0x10" }),
-  });
+  return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id, result: "0x10" }) };
 });
-global.fetch = mockFetch as any;
+
+jest.mock("undici", () => {
+  return {
+    fetch: (url: any, options: any) => mockFetch(url, options),
+    Agent: class {
+      opts: any;
+      constructor(opts: any) { this.opts = opts; }
+    }
+  };
+});
 
 // Enhanced WebSocket mock with proper event handling
 class MockWebSocket {
@@ -83,7 +87,7 @@ jest.mock("fs", () => ({
   })
 }));
 
-describe("Enhanced RPC Class Tests", () => {
+describe("RPC", () => {
   let rpc: RPC;
   let initializeSpy: jest.SpyInstance;
 
@@ -100,187 +104,153 @@ describe("Enhanced RPC Class Tests", () => {
     jest.clearAllMocks();
   });
 
-  describe("Constructor and Validation", () => {
-    test("should validate chainId is required", () => {
+  describe("Config validation", () => {
+    test("throws when chainId is missing", () => {
       expect(() => new RPC({ chainId: "" })).toThrow("chainId is required");
     });
 
-    test("should validate chainId format", () => {
+    test("throws when chainId is not hex (missing 0x prefix)", () => {
       expect(() => new RPC({ chainId: "invalid" })).toThrow("chainId must be in hex format");
     });
 
-    test("should validate ttl range (negative)", () => {
+    test("throws when ttl is <= 0", () => {
       expect(() => new RPC({ chainId: "0x0001", ttl: -1 })).toThrow("ttl must be between 1 and 3600 seconds");
     });
 
-    test("should validate ttl range (too high)", () => {
+    test("throws when ttl exceeds 3600 seconds", () => {
       expect(() => new RPC({ chainId: "0x0001", ttl: 9999 })).toThrow("ttl must be between 1 and 3600 seconds");
     });
 
-    test("should validate maxRetry range", () => {
+    test("throws when maxRetry exceeds 10", () => {
       expect(() => new RPC({ chainId: "0x0001", maxRetry: 15 })).toThrow("maxRetry must be between 0 and 10");
     });
 
-    test("should accept maxRetry of 0", () => {
+    test("accepts maxRetry of 0 (no retries)", () => {
       const r = new RPC({ chainId: "0x0001", maxRetry: 0 });
       expect(r["maxRetry"]).toBe(0);
       r.destroy();
     });
 
-    test("should validate loadBalancing strategy", () => {
+    test("throws for an unrecognised loadBalancing strategy", () => {
       expect(() => new RPC({ chainId: "0x0001", loadBalancing: "invalid" as any })).toThrow("loadBalancing must be 'fastest', 'round-robin', or 'random'");
     });
+
+
   });
 
-  describe("getRpc and Load Balancing", () => {
-    test("should use fastest strategy by default (sync init)", () => {
-      // After construction, init() has loaded sync data. The first URL is the fastest
-      // since all are initialized with time=999999999999.
+  describe("getRpc — load balancing strategies", () => {
+    test("fastest: returns first endpoint (lowest latency after validation)", () => {
+      // All endpoints start with time=999999999999 from init(); first slot wins
       const url = rpc.getRpc("https");
       expect(url).toBe("https://rpc1.com");
     });
 
-    test("should return WebSocket URLs for ws type", () => {
+    test("fastest: returns WebSocket URL for 'ws' type", () => {
       const url = rpc.getRpc("ws");
       expect(url).toBe("wss://ws1.com");
     });
 
-    test("should throw for invalid RPC type", () => {
+    test("throws for an unrecognised RPC type", () => {
       expect(() => rpc.getRpc("invalid" as any)).toThrow('Invalid RPC type: "invalid"');
     });
 
-    test("should support round-robin load balancing", () => {
-      const rr = new RPC({ chainId: "0x0001", loadBalancing: "round-robin" });
+    test("throws when endpoint list is empty", () => {
+      rpc["validRPCs"] = [];
+      expect(() => rpc.getRpc("https")).toThrow("No valid https URLs found");
+    });
 
-      // Manually set valid RPCs for deterministic test
+    test("round-robin: cycles across all endpoints and wraps back to start", () => {
+      const rr = new RPC({ chainId: "0x0001", loadBalancing: "round-robin" });
       rr["validRPCs"] = [
         { url: "https://rpc1.com", time: 100 },
-        { url: "https://rpc2.com", time: 200 }
+        { url: "https://rpc2.com", time: 200 },
       ];
-
-      const first = rr.getRpc("https");
-      const second = rr.getRpc("https");
-      const third = rr.getRpc("https");
-
-      expect([first, second, third]).toEqual(["https://rpc1.com", "https://rpc2.com", "https://rpc1.com"]);
+      expect([rr.getRpc("https"), rr.getRpc("https"), rr.getRpc("https")])
+        .toEqual(["https://rpc1.com", "https://rpc2.com", "https://rpc1.com"]);
       rr.destroy();
     });
 
-    test("should support round-robin for WebSocket", () => {
+    test("round-robin: cycles WebSocket endpoints independently of HTTP counter", () => {
       const rr = new RPC({ chainId: "0x0001", loadBalancing: "round-robin" });
-
       rr["validWSRPCs"] = [
         { url: "wss://ws1.com", time: 100 },
-        { url: "wss://ws2.com", time: 200 }
+        { url: "wss://ws2.com", time: 200 },
       ];
-
-      const first = rr.getRpc("ws");
-      const second = rr.getRpc("ws");
-      expect([first, second]).toEqual(["wss://ws1.com", "wss://ws2.com"]);
+      expect([rr.getRpc("ws"), rr.getRpc("ws")]).toEqual(["wss://ws1.com", "wss://ws2.com"]);
       rr.destroy();
     });
 
-    test("should support random load balancing", () => {
+    test("random: always returns a URL that exists in the valid set", () => {
       const rr = new RPC({ chainId: "0x0001", loadBalancing: "random" });
       rr["validRPCs"] = [
         { url: "https://rpc1.com", time: 100 },
-        { url: "https://rpc2.com", time: 200 }
+        { url: "https://rpc2.com", time: 200 },
       ];
-
       const url = rr.getRpc("https");
       expect(["https://rpc1.com", "https://rpc2.com"]).toContain(url);
       rr.destroy();
     });
-
-    test("should throw when no valid URLs exist", () => {
-      rpc["validRPCs"] = [];
-      expect(() => rpc.getRpc("https")).toThrow("No valid https URLs found");
-    });
   });
 
-  describe("Utility Methods", () => {
-    test("should get valid RPC count", () => {
+  describe("getValidRPCCount / getAllValidRPCs", () => {
+    test("getValidRPCCount returns the number of loaded endpoints per type", () => {
       expect(rpc.getValidRPCCount("https")).toBe(2);
       expect(rpc.getValidRPCCount("ws")).toBe(2);
     });
 
-    test("should get all valid RPCs as copies", () => {
-      const httpRPCs = rpc.getAllValidRPCs("https");
-      expect(Array.isArray(httpRPCs)).toBe(true);
-      expect(httpRPCs.length).toBe(2);
-
-      // Verify it returns a copy, not the internal array
-      httpRPCs.pop();
+    test("getAllValidRPCs returns a defensive copy — mutations don't affect internal state", () => {
+      const copy = rpc.getAllValidRPCs("https");
+      expect(copy.length).toBe(2);
+      copy.pop();
       expect(rpc.getAllValidRPCs("https").length).toBe(2);
     });
+  });
 
-    test("should get failure statistics", () => {
-      // Clear any failures from background initialization attempts
+  describe("getFailureStats / clearFailedURLs", () => {
+    test("getFailureStats returns zeroes when no failures have occurred", () => {
       rpc.clearFailedURLs();
-      const stats = rpc.getFailureStats();
-      expect(stats).toEqual({ totalFailed: 0, inBackoff: 0, overMaxRetries: 0 });
+      expect(rpc.getFailureStats()).toEqual({ totalFailed: 0, inBackoff: 0, overMaxRetries: 0 });
     });
 
-    test("should clear failed URLs", () => {
+    test("clearFailedURLs resets all tracked failures to zero", () => {
       rpc.drop("https://failed-rpc.com");
       expect(rpc.getFailureStats().totalFailed).toBeGreaterThan(0);
-
       rpc.clearFailedURLs();
       expect(rpc.getFailureStats().totalFailed).toBe(0);
     });
   });
 
-  describe("drop() and Failure Tracking", () => {
-    test("should mark an RPC as failed when drop is called", () => {
+  describe("drop() — failure tracking and exponential backoff", () => {
+    test("records the URL in failedURL map with count = 1 on first drop", () => {
       rpc.drop("https://failing.com");
       expect(rpc["failedURL"].has("https://failing.com")).toBe(true);
       expect(rpc["failedURL"].get("https://failing.com")!.count).toBe(1);
     });
 
-    test("should increment failure count by 1 per drop", () => {
+    test("increments failure count by 1 on each successive drop call", () => {
       rpc.drop("https://failing.com");
-      expect(rpc["failedURL"].get("https://failing.com")!.count).toBe(1);
-
       rpc.drop("https://failing.com");
-      expect(rpc["failedURL"].get("https://failing.com")!.count).toBe(2);
-
       rpc.drop("https://failing.com");
       expect(rpc["failedURL"].get("https://failing.com")!.count).toBe(3);
     });
 
-    test("should implement exponential backoff for failed URLs", () => {
+    test("exponential backoff: nextRetry grows with each failure (2nd delay > 1st delay)", () => {
       const url = "https://failed-rpc.com";
-
-      // First failure
       rpc["drop_"](url);
-      let failureInfo = rpc["failedURL"].get(url)!;
-      expect(failureInfo.count).toBe(1);
-      expect(failureInfo.nextRetry).toBeGreaterThan(Date.now());
-
-      // Second failure should have longer backoff
-      const firstBackoff = failureInfo.nextRetry! - Date.now();
+      const firstBackoff = rpc["failedURL"].get(url)!.nextRetry! - Date.now();
       rpc["drop_"](url);
-      failureInfo = rpc["failedURL"].get(url)!;
-      const secondBackoff = failureInfo.nextRetry! - Date.now();
-
+      const secondBackoff = rpc["failedURL"].get(url)!.nextRetry! - Date.now();
       expect(secondBackoff).toBeGreaterThan(firstBackoff);
     });
 
-    test("should report correct failure stats categories", () => {
-      // Clear any failures from background initialization
+    test("getFailureStats correctly classifies: overMaxRetries vs inBackoff", () => {
       rpc.clearFailedURLs();
-
-      const url1 = "https://maxed-out.com";
-      const url2 = "https://in-backoff.com";
-
-      // Push url1 past maxRetry (3)
-      rpc["drop_"](url1);
-      rpc["drop_"](url1);
-      rpc["drop_"](url1);
-
-      // url2 has 1 failure, still in backoff
-      rpc["drop_"](url2);
-
+      // Drive url1 to maxRetry (3)
+      rpc["drop_"]("https://maxed-out.com");
+      rpc["drop_"]("https://maxed-out.com");
+      rpc["drop_"]("https://maxed-out.com");
+      // url2 has 1 failure — still in backoff window
+      rpc["drop_"]("https://in-backoff.com");
       const stats = rpc.getFailureStats();
       expect(stats.totalFailed).toBe(2);
       expect(stats.overMaxRetries).toBe(1);
@@ -289,142 +259,106 @@ describe("Enhanced RPC Class Tests", () => {
   });
 
   describe("shouldSkipURL", () => {
-    test("should not skip unknown URLs", () => {
+    test("returns false for URLs with no recorded failures", () => {
       expect(rpc["shouldSkipURL"]("https://unknown.com")).toBe(false);
     });
 
-    test("should skip URLs that have exceeded maxRetry", () => {
+    test("returns true when a URL has reached maxRetry", () => {
       const url = "https://dead.com";
-      rpc["drop_"](url);
-      rpc["drop_"](url);
-      rpc["drop_"](url); // count = 3 = maxRetry
+      rpc["drop_"](url); rpc["drop_"](url); rpc["drop_"](url); // count == 3 == maxRetry
       expect(rpc["shouldSkipURL"](url)).toBe(true);
     });
 
-    test("should skip URLs in backoff period", () => {
+    test("returns true while nextRetry is still in the future (backoff window)", () => {
       const url = "https://backoff.com";
-      rpc["drop_"](url); // nextRetry is in the future
+      rpc["drop_"](url);
       expect(rpc["shouldSkipURL"](url)).toBe(true);
     });
 
-    test("should reset failures after timeToResetFailedURL", () => {
+    test("returns false once the 6-hour failure reset window has elapsed", () => {
       const url = "https://old-failure.com";
-      rpc["drop_"](url);
-      rpc["drop_"](url);
-      rpc["drop_"](url);
-
-      // Fast-forward past the 6-hour reset window
+      rpc["drop_"](url); rpc["drop_"](url); rpc["drop_"](url);
+      // Backdate the failure timestamp to simulate 7 hours ago
       const entry = rpc["failedURL"].get(url)!;
-      entry.time = Date.now() - (7 * 60 * 60 * 1000); // 7 hours ago
+      entry.time = Date.now() - 7 * 60 * 60 * 1000;
       rpc["failedURL"].set(url, entry);
-
       expect(rpc["shouldSkipURL"](url)).toBe(false);
     });
   });
 
-  describe("Periodic Initialization", () => {
-    test("should call initialize() on construction", () => {
+  describe("Periodic re-validation (TTL)", () => {
+    test("initialize() is called exactly once during construction", () => {
       expect(initializeSpy).toHaveBeenCalledTimes(1);
     });
 
-    test("should schedule periodic initialize() via ttl", async () => {
-      // Flush all microtasks and pending promises from the initial initialize()
-      // We need multiple cycles because initialize() does async work before scheduling the timer
-      for (let i = 0; i < 10; i++) {
-        await jest.advanceTimersByTimeAsync(100);
-      }
+    test("initialize() is called again after ttl seconds elapse", async () => {
+      // Drain microtasks from the initial async initialize()
+      for (let i = 0; i < 10; i++) await jest.advanceTimersByTimeAsync(100);
       expect(initializeSpy).toHaveBeenCalledTimes(1);
-
-      // Advance past the TTL (5 seconds) — the timer was set after initialize() resolved
+      // Advance past ttl=5s — the next scheduled refresh fires
       await jest.advanceTimersByTimeAsync(5000);
       expect(initializeSpy).toHaveBeenCalledTimes(2);
     });
   });
 
-  describe("HTTP Call Validation", () => {
-    test("should make a valid HTTP call", async () => {
+  describe("httpCall — internal RPC validation via undici", () => {
+    test("sends a POST eth_blockNumber request to the given URL", async () => {
       await rpc["httpCall"]("https://rpc1.com", 1);
-      expect(global.fetch).toHaveBeenCalledWith(
-        "https://rpc1.com",
-        expect.any(Object)
-      );
+      expect(mockFetch).toHaveBeenCalledWith("https://rpc1.com", expect.any(Object));
     });
 
-    test("should handle HTTP errors and track failure", async () => {
-      const originalFetch = global.fetch;
-      global.fetch = jest.fn().mockRejectedValue(new Error("Network error"));
-
+    test("records the URL in failedURL map when the network request throws", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("Network error"));
       const r = new RPC({ chainId: "0x0001" });
-
       await expect(r["httpCall"]("https://failing-rpc.com", 1)).rejects.toThrow("Network error");
       expect(r["failedURL"].has("https://failing-rpc.com")).toBe(true);
-
       r.destroy();
-      global.fetch = originalFetch;
     });
 
-    test("should skip URLs in backoff during httpCall", async () => {
-      // Force the URL into permanent failure
-      rpc["failedURL"].set("https://rpc1.com", {
-        count: 10,
-        time: Date.now(),
-        nextRetry: Date.now() + 60000
-      });
-
+    test("rejects immediately (no network call) when the URL is already in backoff", async () => {
+      rpc["failedURL"].set("https://rpc1.com", { count: 10, time: Date.now(), nextRetry: Date.now() + 60000 });
       await expect(rpc["httpCall"]("https://rpc1.com", 1)).rejects.toThrow("in backoff period");
     });
   });
 
-  describe("WebSocket Call Validation", () => {
-    test("should handle WebSocket timeout", async () => {
+  describe("wsCall — internal WebSocket RPC validation", () => {
+    test("rejects with a timeout error when the WebSocket never responds within validationTimeout", async () => {
       jest.useRealTimers();
-
-      const TimeoutWebSocket = class {
-        onopen: ((event: Event) => void) | null = null;
-        onmessage: ((event: MessageEvent) => void) | null = null;
-        onerror: ((event: Event) => void) | null = null;
-        onclose: ((event: CloseEvent) => void) | null = null;
+      // A WebSocket that opens connections but never sends a message
+      const SilentWebSocket = class {
+        onopen: ((e: Event) => void) | null = null;
+        onmessage: ((e: MessageEvent) => void) | null = null;
+        onerror: ((e: Event) => void) | null = null;
+        onclose: ((e: CloseEvent) => void) | null = null;
         send = jest.fn();
         close = jest.fn();
-        constructor(url: string) { }
+        constructor(_url: string) { }
       };
-
-      const originalWebSocket = global.WebSocket;
-      global.WebSocket = TimeoutWebSocket as any;
-
+      const original = global.WebSocket;
+      global.WebSocket = SilentWebSocket as any;
       const r = new RPC({ chainId: "0x0001" });
-
       await expect(r["wsCall"]("wss://hanging-ws.com", 1)).rejects.toThrow("WebSocket timeout");
-
       r.destroy();
-      global.WebSocket = originalWebSocket;
+      global.WebSocket = original;
       jest.useFakeTimers();
     }, 15000);
   });
 
   describe("getRpcAsync", () => {
-    test("should resolve with a valid URL after async initialization", async () => {
-      // Use fake timers but advance them to let initialize() complete
+    test("resolves with a valid https URL string once async initialization has settled", async () => {
       const r = new RPC({ chainId: "0x0001" });
-
-      // Flush the async initialization
-      for (let i = 0; i < 10; i++) {
-        await jest.advanceTimersByTimeAsync(100);
-      }
-
+      for (let i = 0; i < 10; i++) await jest.advanceTimersByTimeAsync(100);
       const url = r.getRpc("https");
-      expect(url).toBeDefined();
       expect(typeof url).toBe("string");
-
+      expect(url.startsWith("https://")).toBe(true);
       r.destroy();
     });
   });
 
   describe("destroy()", () => {
-    test("should clear all state", () => {
+    test("clears all endpoint lists, failure records, and cancels the refresh timer", () => {
       rpc.drop("https://fail.com");
       rpc.destroy();
-
       expect(rpc["refreshTimer"]).toBeNull();
       expect(rpc["validRPCs"]).toEqual([]);
       expect(rpc["validWSRPCs"]).toEqual([]);
@@ -432,8 +366,8 @@ describe("Enhanced RPC Class Tests", () => {
     });
   });
 
-  describe("pathToRpcJson", () => {
-    test("should load RPCs from a custom JSON file path", () => {
+  describe("pathToRpcJson — custom RPC list loading", () => {
+    test("loads endpoints from the specified custom JSON file", () => {
       const customRpc = new RPC({
         chainId: "0x0001",
         pathToRpcJson: "/path/to/custom-rpc-list.json",
@@ -453,7 +387,7 @@ describe("Enhanced RPC Class Tests", () => {
       customRpc.destroy();
     });
 
-    test("should fall back to bundled list when pathToRpcJson does not exist", () => {
+    test("falls back to bundled rpcList.min.json when the specified path does not exist", () => {
       const fallbackRpc = new RPC({
         chainId: "0x0001",
         pathToRpcJson: "/path/to/nonexistent-rpc-list.json",
@@ -468,7 +402,7 @@ describe("Enhanced RPC Class Tests", () => {
       fallbackRpc.destroy();
     });
 
-    test("should use default data when pathToRpcJson is empty string", () => {
+    test("uses bundled list when pathToRpcJson is an empty string", () => {
       const defaultRpc = new RPC({
         chainId: "0x0001",
         pathToRpcJson: "",
@@ -481,7 +415,7 @@ describe("Enhanced RPC Class Tests", () => {
       defaultRpc.destroy();
     });
 
-    test("custom path RPCs should work with load balancing", () => {
+    test("custom-path endpoints are compatible with round-robin load balancing", () => {
       const customRpc = new RPC({
         chainId: "0x0001",
         pathToRpcJson: "/path/to/custom-rpc-list.json",
@@ -501,7 +435,7 @@ describe("Enhanced RPC Class Tests", () => {
       customRpc.destroy();
     });
 
-    test("custom path RPCs should work with drop()", () => {
+    test("drop() correctly tracks failures for custom-path endpoints", () => {
       const customRpc = new RPC({
         chainId: "0x0001",
         pathToRpcJson: "/path/to/custom-rpc-list.json",

@@ -46,8 +46,13 @@ describe("E2E: Ethereum Lifecycle", () => {
     let hasValidated: boolean;
 
     beforeAll(async () => {
+        const start = Date.now();
         rpc = new RPC({ chainId: "0x0001", ttl: 3600 });
-        hasValidated = await waitForValidation(rpc);
+        hasValidated = await waitForValidation(rpc, 15_000);
+        const timeTaken = Date.now() - start;
+
+        // Fail loudly if initialization is stalling (typically an IPv6 blackhole issue > 60s)
+        expect(timeTaken).toBeLessThan(20_000);
     }, E2E_TIMEOUT);
 
     afterAll(() => {
@@ -72,36 +77,16 @@ describe("E2E: Ethereum Lifecycle", () => {
         const allRpcs = rpc.getAllValidRPCs("https");
         let success = false;
 
-        for (const ep of allRpcs.slice(0, 3)) {
-            try {
-                const controller = new AbortController();
-                const tm = setTimeout(() => controller.abort(), 8_000);
-                const response = await fetch(ep.url, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({
-                        jsonrpc: "2.0",
-                        method: "eth_blockNumber",
-                        params: [],
-                        id: 99,
-                    }),
-                    signal: controller.signal,
-                });
-                clearTimeout(tm);
+        try {
+            // Using the new robust call() wrapper with an 8-second timeout, max 3 fails
+            const result = await rpc.call("https", "eth_blockNumber", [], 8000, 3);
 
-                if (response.ok) {
-                    const data = await response.json();
-                    expect(data.jsonrpc).toBe("2.0");
-                    expect(data.id).toBe(99);
-                    expect(data.result).toMatch(/^0x[0-9a-fA-F]+$/);
-                    const blockNumber = parseInt(data.result, 16);
-                    expect(blockNumber).toBeGreaterThan(0);
-                    success = true;
-                    break;
-                }
-            } catch {
-                continue;
-            }
+            expect(result).toMatch(/^0x[0-9a-fA-F]+$/);
+            const blockNumber = parseInt(result, 16);
+            expect(blockNumber).toBeGreaterThan(0);
+            success = true;
+        } catch (error) {
+            console.warn("E2E call() fallback failed completely:", error);
         }
         expect(success).toBe(true);
     }, E2E_TIMEOUT);

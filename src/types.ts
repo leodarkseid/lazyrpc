@@ -14,6 +14,12 @@ export interface RPCConfig {
   log?: boolean;
   /** Load balancing strategy (default: "fastest") */
   loadBalancing?: "fastest" | "round-robin" | "random";
+  /** Exponential backoff base delay in milliseconds (default: 2000) */
+  baseBackoffDelay?: number;
+  /** Maximum backoff delay in milliseconds (default: 300000) */
+  maxBackoffDelay?: number;
+  /** Timeout for RPC validation calls in milliseconds (default: 5000) */
+  validationTimeout?: number;
 }
 
 /**

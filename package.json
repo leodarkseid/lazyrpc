@@ -1,11 +1,12 @@
 {
   "name": "lazy-rpc",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "scripts": {
     "test": "jest",
-    "build": "tsup src/index.ts --format cjs,esm --dts --clean --minify  && cp src/rpcList.min.json dist/"
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean --minify --shims && cp src/rpcList.min.json dist/",
+    "a": "node test-npm-package/index.js"
   },
   "repository": {
     "type": "git",
@@ -51,5 +52,8 @@
     "ts-jest": "^29.2.6",
     "tsup": "^8.4.0",
     "typescript": "^5.8.2"
+  },
+  "dependencies": {
+    "undici": "^7.22.0"
   }
 }
