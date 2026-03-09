@@ -9,7 +9,7 @@ import {
   RPCCallResult,
   RPCType,
   LoadBalancingStrategy,
-  FailureStats
+  FailureStats,
 } from "./types";
 
 /**
@@ -55,6 +55,17 @@ export class RPC {
   private isDestroyed: boolean = false;
 
   /**
+   * Promise that resolves when initialization is complete.
+   * Used to prevent concurrent initialization.
+   */
+  private initPromise: Promise<void> | null = null;
+
+  private cachedRpcList: any = null;
+
+  private baseHttpUrls: string[] = [];
+  private baseWsUrls: string[] = [];
+
+  /**
    * Constructor initializes RPC class with configuration options.
    * @param config - Configuration options for chainId, ttl, maxRetry, and other settings.
    */
@@ -85,7 +96,9 @@ export class RPC {
       this.init();
       this.initialize();
     } catch (err) {
-      try { this.agent.destroy(); } catch (e) { }
+      try {
+        this.agent.destroy();
+      } catch (e) {}
       throw err;
     }
   }
@@ -107,12 +120,20 @@ export class RPC {
       throw new Error("ttl must be between 1 and 3600 seconds");
     }
 
-    if (config.maxRetry !== undefined && (config.maxRetry < 0 || config.maxRetry > 10)) {
+    if (
+      config.maxRetry !== undefined &&
+      (config.maxRetry < 0 || config.maxRetry > 10)
+    ) {
       throw new Error("maxRetry must be between 0 and 10");
     }
 
-    if (config.loadBalancing && !["fastest", "round-robin", "random"].includes(config.loadBalancing)) {
-      throw new Error("loadBalancing must be 'fastest', 'round-robin', or 'random'");
+    if (
+      config.loadBalancing &&
+      !["fastest", "round-robin", "random"].includes(config.loadBalancing)
+    ) {
+      throw new Error(
+        "loadBalancing must be 'fastest', 'round-robin', or 'random'",
+      );
     }
   }
 
@@ -121,30 +142,36 @@ export class RPC {
    * @param chainId - The blockchain chain ID.
    * @returns A promise resolving to an array of RPC URLs.
    */
-  private async getChain(chainId: string): Promise<string[]> {
-    try {
-      const filePath =
-        this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
-          ? this.pathToRpcJson
-          : path.join(__dirname, "rpcList.min.json");
-      let data: string | null = await fs.promises.readFile(filePath, "utf-8");
-      let chainList;
-      try {
-        chainList = JSON.parse(data);
-      } catch (error: any) {
-        throw new Error(`Invalid JSON format in ${filePath}: ${error.message}`);
-      }
-      const result = chainList[chainId];
-      if (!result) {
-        throw new Error(`Chain ID ${chainId} not found in ${filePath}`);
-      }
-      data = null;
-      chainList = null;
-      return result;
-    } catch (error: any) {
-      throw new Error(`Error fetching chain RPCs: ${error.message}`);
-    }
-  }
+
+  // private async getChain(chainId: string): Promise<string[]> {
+  //   try {
+  //     const filePath =
+  //       this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
+  //         ? this.pathToRpcJson
+  //         : path.join(__dirname, "rpcList.min.json");
+  //     if (!this.cachedRpcList) {
+  //       const data: string | null = await fs.promises.readFile(
+  //         filePath,
+  //         "utf-8",
+  //       );
+  //       try {
+  //         this.cachedRpcList = JSON.parse(data);
+  //       } catch (error: any) {
+  //         throw new Error(
+  //           `Invalid JSON format in ${filePath}: ${error.message}`,
+  //         );
+  //       }
+  //     }
+
+  //     const result = this.cachedRpcList[chainId];
+  //     if (!result) {
+  //       throw new Error(`Chain ID ${chainId} not found in ${filePath}`);
+  //     }
+  //     return result;
+  //   } catch (error: any) {
+  //     throw new Error(`Error fetching chain RPCs: ${error.message}`);
+  //   }
+  // }
 
   /**
    * Drops a given URL from the RPC list by marking it as failed.
@@ -163,23 +190,25 @@ export class RPC {
     const prevFailures = this.failedURL.get(url) ?? {
       count: 0,
       time: Date.now(),
-      nextRetry: Date.now()
+      nextRetry: Date.now(),
     };
 
     const newCount = prevFailures.count + count;
     const backoffDelay = Math.min(
       this.baseBackoffDelay * Math.pow(2, newCount - 1),
-      this.maxBackoffDelay // Max backoff
+      this.maxBackoffDelay, // Max backoff
     );
 
     this.failedURL.set(url, {
       count: newCount,
       time: Date.now(),
-      nextRetry: Date.now() + backoffDelay
+      nextRetry: Date.now() + backoffDelay,
     });
 
     if (this.log) {
-      console.warn(`RPC ${url} failed ${newCount} times. Next retry in ${backoffDelay}ms`);
+      console.warn(
+        `RPC ${url} failed ${newCount} times. Next retry in ${backoffDelay}ms`,
+      );
     }
   }
 
@@ -204,7 +233,7 @@ export class RPC {
 
     switch (this.loadBalancing) {
       case "fastest":
-        selectedEndpoint = endpoints.find(e => !this.shouldSkipURL(e.url));
+        selectedEndpoint = endpoints.find((e) => !this.shouldSkipURL(e.url));
         break;
 
       case "round-robin":
@@ -230,7 +259,9 @@ export class RPC {
         break;
 
       case "random":
-        const validEndpoints = endpoints.filter(e => !this.shouldSkipURL(e.url));
+        const validEndpoints = endpoints.filter(
+          (e) => !this.shouldSkipURL(e.url),
+        );
         if (validEndpoints.length > 0) {
           const randomIndex = Math.floor(Math.random() * validEndpoints.length);
           selectedEndpoint = validEndpoints[randomIndex];
@@ -238,7 +269,7 @@ export class RPC {
         break;
 
       default:
-        selectedEndpoint = endpoints.find(e => !this.shouldSkipURL(e.url));
+        selectedEndpoint = endpoints.find((e) => !this.shouldSkipURL(e.url));
     }
 
     if (!selectedEndpoint) {
@@ -293,8 +324,8 @@ export class RPC {
 
     // In our rpcList.min.json, ONLY Ethereum mainnet (0x1) is padded as x0001
     // Other chains like Polygon (0x89) are literally just x89
-    if (cleanHex === '1' || cleanHex === '0001') {
-      return 'x0001';
+    if (cleanHex === "1" || cleanHex === "0001") {
+      return "x0001";
     }
 
     return `x${cleanHex}`;
@@ -303,74 +334,118 @@ export class RPC {
   /**
    * Fetches RPC URLs from the chain list and initializes them.
    */
-  private async initialize(): Promise<void> {
-    try {
-      const formattedChainId = this.formatChainId(this.chainId);
-      const http = await this.getChain(formattedChainId);
-      const ws = await this.getChain(`${formattedChainId}_WS`);
+  private initialize(): Promise<void | null> {
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
-      // Throttle: validate in batches to avoid overwhelming the network
-      const BATCH_SIZE = 10;
-      const allUrls = [
-        ...http.map((h: string) => ({ url: h, type: "https" as RPCType })),
-        ...ws.map((w: string) => ({ url: w, type: "ws" as RPCType })),
-      ];
+    this.initPromise = (async () => {
+      try {
+        // const formattedChainId = this.formatChainId(this.chainId);
+        // const http = await this.getChain(formattedChainId);
+        // const ws = await this.getChain(`${formattedChainId}_WS`);
 
-      const results: RPCCallResult[] = [];
-      for (let i = 0; i < allUrls.length; i += BATCH_SIZE) {
-        const batch = allUrls.slice(i, i + BATCH_SIZE);
-        const batchResults = await Promise.allSettled(
-          batch.map(({ url, type }) =>
-            this.run(type === "https" ? this.httpCall : this.wsCall, url, type)
-          )
-        );
-        for (const result of batchResults) {
-          if (result.status === "fulfilled") {
-            results.push(result.value);
-          } else if (this.log) {
-            console.warn("RPC validation failed:", result.reason);
+        await this.loadBaseUrls();
+        const allUrls = [
+          ...this.baseHttpUrls.map((h: string) => ({
+            url: h,
+            type: "https" as RPCType,
+          })),
+          ...this.baseWsUrls.map((w: string) => ({
+            url: w,
+            type: "ws" as RPCType,
+          })),
+        ];
+        // Throttle: validate in batches to avoid overwhelming the network
+        const BATCH_SIZE = 10;
+
+        const results: RPCCallResult[] = [];
+        for (let i = 0; i < allUrls.length; i += BATCH_SIZE) {
+          const batch = allUrls.slice(i, i + BATCH_SIZE);
+          const batchResults = await Promise.allSettled(
+            batch.map(({ url, type }) =>
+              this.run(
+                type === "https" ? this.httpCall : this.wsCall,
+                url,
+                type,
+              ),
+            ),
+          );
+          for (const result of batchResults) {
+            if (result.status === "fulfilled") {
+              results.push(result.value);
+            } else if (this.log) {
+              console.warn("RPC validation failed:", result.reason);
+            }
           }
         }
+
+        const newHTTP = results
+          .filter((r) => r.type === "https")
+          .sort((a, b) => a.time - b.time)
+          .map((r) => ({ url: r.url, time: r.time }));
+
+        const newWS = results
+          .filter((r) => r.type === "ws")
+          .sort((a, b) => a.time - b.time)
+          .map((r) => ({ url: r.url, time: r.time }));
+
+        // Only replace the lists if we got at least some successes.
+        // This prevents total data loss when network is temporarily down.
+        if (newHTTP.length > 0) {
+          this.validRPCs = newHTTP;
+        }
+        if (newWS.length > 0) {
+          this.validWSRPCs = newWS;
+        }
+
+        if (this.log) {
+          console.log(
+            `Validated ${newHTTP.length} HTTP and ${newWS.length} WebSocket RPCs`,
+          );
+        }
+      } catch (error) {
+        if (this.log) {
+          console.error("Error during RPC initialization:", error);
+        }
+      } finally {
+        // critical: unlock the init promise
+        this.initPromise = null;
+
+        if (this.isDestroyed) return;
+
+        // Schedule next initialization (clear any previous timer first)
+        if (this.refreshTimer) clearTimeout(this.refreshTimer);
+        //jitter
+        const jitter = Math.floor(Math.random() * 2000);
+        this.refreshTimer = setTimeout(
+          () => this.initialize(),
+          (this.ttl * 1000),
+        );
+        if (
+          this.refreshTimer &&
+          typeof this.refreshTimer === "object" &&
+          "unref" in this.refreshTimer
+        ) {
+          this.refreshTimer.unref();
+        }
       }
+    })();
+    return this.initPromise;
+  }
 
-      const newHTTP = results
-        .filter((r) => r.type === "https")
-        .sort((a, b) => a.time - b.time)
-        .map((r) => ({ url: r.url, time: r.time }));
+  private async loadBaseUrls(): Promise<void> {
+    if (this.baseHttpUrls.length > 0 && this.baseWsUrls.length > 0) return;
 
-      const newWS = results
-        .filter((r) => r.type === "ws")
-        .sort((a, b) => a.time - b.time)
-        .map((r) => ({ url: r.url, time: r.time }));
-
-      // Only replace the lists if we got at least some successes.
-      // This prevents total data loss when network is temporarily down.
-      if (newHTTP.length > 0) {
-        this.validRPCs = newHTTP;
-      }
-      if (newWS.length > 0) {
-        this.validWSRPCs = newWS;
-      }
-
-      if (this.log) {
-        console.log(`Validated ${newHTTP.length} HTTP and ${newWS.length} WebSocket RPCs`);
-      }
-    } catch (error) {
-      if (this.log) {
-        console.error("Error during RPC initialization:", error);
-      }
-    }
-
-    if (this.isDestroyed) return;
-
-    // Schedule next initialization (clear any previous timer first)
-    if (this.refreshTimer) {
-      clearTimeout(this.refreshTimer);
-    }
-    this.refreshTimer = setTimeout(() => this.initialize(), this.ttl * 1000);
-    if (this.refreshTimer && typeof this.refreshTimer === 'object' && 'unref' in this.refreshTimer) {
-      this.refreshTimer.unref();
-    }
+    const filePath =
+      this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
+        ? this.pathToRpcJson
+        : path.join(__dirname, "rpcList.min.json");
+    const data = await fs.promises.readFile(filePath, "utf-8");
+    const parseJson = JSON.parse(data);
+    const formattedChainId = this.formatChainId(this.chainId);
+    this.baseHttpUrls = parseJson[formattedChainId] || [];
+    this.baseWsUrls = parseJson[`${formattedChainId}_WS`] || [];
   }
 
   /**
@@ -410,7 +485,7 @@ export class RPC {
     return {
       totalFailed: this.failedURL.size,
       inBackoff,
-      overMaxRetries
+      overMaxRetries,
     };
   }
 
@@ -432,12 +507,15 @@ export class RPC {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
     }
-    if (this.agent && typeof this.agent.destroy === 'function') {
-      try { this.agent.destroy(); } catch (e) { }
+    if (this.agent && typeof this.agent.destroy === "function") {
+      try {
+        this.agent.destroy();
+      } catch (e) {}
     }
     this.validRPCs = [];
     this.validWSRPCs = [];
     this.failedURL.clear();
+    this.cachedRpcList = null;
     if (this.log) {
       console.log("RPC instance destroyed");
     }
@@ -461,6 +539,11 @@ export class RPC {
    * @returns Promise that resolves with the response data.
    */
   private async httpCall(url: string, id: number): Promise<any> {
+    const controller = new AbortController();
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.validationTimeout,
+    );
     try {
       if (this.shouldSkipURL(url)) {
         throw new Error(`URL ${url} is in backoff period`);
@@ -469,9 +552,6 @@ export class RPC {
       if (!url) {
         throw new Error("Invalid HTTP URL");
       }
-
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), this.validationTimeout);
 
       const response = await undiciFetch(url, {
         method: "POST",
@@ -483,10 +563,8 @@ export class RPC {
           id,
         }),
         signal: controller.signal,
-        dispatcher: this.agent
+        dispatcher: this.agent,
       });
-
-      clearTimeout(timeout);
 
       assert(response.ok, "Invalid HTTP Response");
       const data: any = await response.json();
@@ -496,6 +574,8 @@ export class RPC {
       this.drop_(url);
       if (this.log) console.error(`HTTP request failed - ${url}: ${error}`);
       throw error;
+    } finally {
+      clearTimeout(timeout);
     }
   }
 
@@ -522,7 +602,9 @@ export class RPC {
         let isResolved = false;
 
         const closeWs = () => {
-          try { ws.close(); } catch (e) { }
+          try {
+            ws.close();
+          } catch (e) {}
         };
 
         // Timeout to prevent hanging connections
@@ -542,7 +624,7 @@ export class RPC {
               method: "eth_blockNumber",
               params: [],
               id,
-            })
+            }),
           );
         };
 
@@ -580,16 +662,22 @@ export class RPC {
         };
 
         ws.onclose = (event) => {
-          if (!isResolved && event.code !== 1000) { // 1000 is normal closure
+          if (!isResolved && event.code !== 1000) {
+            // 1000 is normal closure
             isResolved = true;
             clearTimeout(timeout);
             this.drop_(url);
-            reject(new Error(`WebSocket closed unexpectedly for ${url}: ${event.code}`));
+            reject(
+              new Error(
+                `WebSocket closed unexpectedly for ${url}: ${event.code}`,
+              ),
+            );
           }
         };
       } catch (error) {
         this.drop_(url);
-        if (this.log) console.error(`Failed to create WebSocket for ${url}:`, error);
+        if (this.log)
+          console.error(`Failed to create WebSocket for ${url}:`, error);
         reject(error);
       }
     });
@@ -602,26 +690,20 @@ export class RPC {
    */
   private shouldSkipURL(url: string): boolean {
     const failureInfo = this.failedURL.get(url);
-    if (!failureInfo) {
-      return false;
-    }
+    if (!failureInfo) return false;
 
     // Reset failures if enough time has passed
     if (Date.now() - failureInfo.time > this.timeToResetFailedURL) {
-      this.failedURL.set(url, { count: 0, time: Date.now(), nextRetry: Date.now() });
+      this.failedURL.delete(url);
+      // this.failedURL.set(url, { count: 0, time: Date.now(), nextRetry: Date.now() });
       return false;
     }
 
     // Check if we've exceeded max retries
-    if (failureInfo.count >= this.maxRetry) {
-      return true;
-    }
-
+    if (failureInfo.count >= this.maxRetry) return true;
     // Check if we're still in backoff period
-    if (failureInfo.nextRetry && Date.now() < failureInfo.nextRetry) {
+    if (failureInfo.nextRetry && Date.now() < failureInfo.nextRetry)
       return true;
-    }
-
     return false;
   }
 
@@ -635,13 +717,12 @@ export class RPC {
   private async run(
     fn: Function,
     url: string,
-    type: RPCType
+    type: RPCType,
   ): Promise<RPCCallResult> {
     this.id++;
     const id = this.id;
-    const start = performance.now();
-
     try {
+      const start = performance.now();
       await fn(url, id);
       const stop = performance.now();
       return { time: stop - start, type, url };
@@ -649,66 +730,5 @@ export class RPC {
       // Error already handled in httpCall/wsCall
       throw error;
     }
-  }
-
-  /**
-   * Transparent wrapper that enforces execution timeouts and automatic failover.
-   * @param type - The type of RPC: "ws" or "https".
-   * @param method - The JSON-RPC method to call.
-   * @param params - The JSON-RPC parameters.
-   * @param timeoutMs - Maximum time per request before considering it a default hang (default: 5000)
-   * @param maxFails - Maximum number of URLs to try before giving up (default: valid RPC length)
-   */
-  public async call(type: RPCType, method: string, params: any[] = [], timeoutMs: number = 5000, maxFails?: number): Promise<any> {
-    await this.initialize();
-
-    const endpoints = type === "https" ? this.validRPCs : this.validWSRPCs;
-    const limit = maxFails || Math.max(1, endpoints.length);
-    let attempts = 0;
-    let lastError: any = new Error("No endpoints available");
-
-    while (attempts < limit) {
-      attempts++;
-      let url: string;
-      try {
-        url = this.getRpc(type);
-      } catch (err) {
-        lastError = err;
-        break; // All endpoints in backoff
-      }
-
-      try {
-        if (type === "https") {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), timeoutMs);
-
-          const response = await undiciFetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ jsonrpc: "2.0", method, params, id: Date.now() }),
-            signal: controller.signal,
-            dispatcher: this.agent
-          });
-
-          clearTimeout(timeout);
-
-          if (!response.ok) {
-            throw new Error(`HTTP Error ${response.status}`);
-          }
-
-          const data = await response.json() as any;
-          if (data.error) throw new Error(data.error.message);
-          return data.result;
-        } else {
-          throw new Error("call() wrapper currently only implements HTTPS failover. Use getRpc('ws') for WebSocket connections.");
-        }
-      } catch (error) {
-        if (this.log) console.warn(`Call failed on ${url}: ${error}`);
-        this.drop(url);
-        lastError = error;
-      }
-    }
-
-    throw new Error(`call() failed after ${attempts} attempts. Last error: ${lastError}`);
   }
 }

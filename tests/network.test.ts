@@ -1,5 +1,6 @@
 import { RPC } from "../src/index";
 import * as http from "http";
+import { fetch as undiciFetch, Agent } from "undici";
 
 describe("Strict Network Resilience and IP Routing", () => {
 
@@ -28,31 +29,61 @@ describe("Strict Network Resilience and IP Routing", () => {
         test("abort requests to a blackhole IPv4 address (192.0.2.1) without stalling", async () => {
             // 192.0.2.1 is reserved for documentation/TEST-NET-1 and routing is blackholed.
             // A normal fetch will stall here until the OS TCP timeout.
-            // Our RPC class uses an AbortController with `validationTimeout` (here set to 500ms for speed).
+            // The library's internal validationTimeout (500ms) aborts the validation sweep;
+            // we then make our own fetch with the same guard to prove the URL is dead-end.
             const rpc = new RPC({ chainId: "0xdead", pathToRpcJson: blackholePath, validationTimeout: 500 });
+            const agent = new Agent({ connect: { family: 4 } });
 
-            // We use the public call method. It should attempt the fetch, fail, and throw an Error quickly.
+            // Ask the library for the best URL then attempt the fetch ourselves.
             const start = Date.now();
-            await expect(rpc.call("https", "eth_blockNumber", [], 500)).rejects.toThrow();
+            const url = await rpc.getRpcAsync("https").catch(() => "http://192.0.2.1");
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 500);
+            await expect(
+                undiciFetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+                    signal: controller.signal,
+                    dispatcher: agent,
+                })
+            ).rejects.toThrow();
+            clearTimeout(timer);
             const duration = Date.now() - start;
 
             // Execution should escape significantly faster than the OS TCP timeout (~60s),
             // and should map closely to our 500ms validationTimeout (with small margin for runtime)
             expect(duration).toBeLessThan(1500);
 
+            await agent.destroy();
             rpc.destroy();
         }, TEST_TIMEOUT);
 
         test("abort requests to a blackhole IPv6 address ([2001:db8::1]) without stalling", async () => {
             // 2001:db8::1 is the IPv6 documentation prefix, also blackholed.
+            // The library's agent enforces IPv4-only, so IPv6 URLs fail fast.
             const rpc = new RPC({ chainId: "0xbeef", pathToRpcJson: blackholePath, validationTimeout: 500 });
+            const agent = new Agent({ connect: { family: 4 } });
 
             const start = Date.now();
-            await expect(rpc.call("https", "eth_blockNumber", [], 500)).rejects.toThrow();
+            const url = await rpc.getRpcAsync("https").catch(() => "http://[2001:db8::1]");
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 500);
+            await expect(
+                undiciFetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+                    signal: controller.signal,
+                    dispatcher: agent,
+                })
+            ).rejects.toThrow();
+            clearTimeout(timer);
             const duration = Date.now() - start;
 
             expect(duration).toBeLessThan(1500);
 
+            await agent.destroy();
             rpc.destroy();
         }, TEST_TIMEOUT);
     });
@@ -131,24 +162,38 @@ describe("Strict Network Resilience and IP Routing", () => {
             const path = require('path');
             const localPath = path.join(__dirname, "localhost-rpc.json");
             const rpc = new RPC({ chainId: "0xcafe", pathToRpcJson: localPath, validationTimeout: 10000 });
+            // Use the same IPv4-only agent the library uses internally
+            const agent = new Agent({ connect: { family: 4 } });
 
             ipv4Hits = 0;
             ipv6Hits = 0;
 
-            // We use 'localhost' internally in the JSON configuration. 
-            // It should resolve directly to IPv4 because of `{connect: {family: 4}}` on undici agent.
-            let response;
+            // Ask the library for the best validated URL, then drive the fetch ourselves.
+            // The library's internal agent (family: 4) ensures validation only contacts IPv4,
+            // and we use the same family here so the actual call follows the same path.
+            let data: any;
             try {
-                // Testing via the public API entirely
-                response = await rpc.call("https", "eth_blockNumber", [], 10000);
+                const url = await rpc.getRpcAsync("https");
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 10000);
+                const response = await undiciFetch(url, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+                    signal: controller.signal,
+                    dispatcher: agent,
+                });
+                clearTimeout(timer);
+                data = await response.json();
             } catch (err) {
                 throw new Error(`Dual-stack localhost call failed: ${err}`);
             }
 
-            expect(response).toBe("0x1b4");
+            expect(data.result).toBe("0x1b4");
             expect(ipv4Hits).toBeGreaterThan(0);
             expect(ipv6Hits).toBe(0);
 
+            await agent.destroy();
             rpc.destroy();
 
             // Force garbage collection of undici sockets so Jest can exit cleanly

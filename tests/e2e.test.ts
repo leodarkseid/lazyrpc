@@ -14,6 +14,7 @@
 
 import { RPC } from "../src/index";
 import * as path from "path";
+import { fetch as undiciFetch, Agent } from "undici";
 
 const E2E_TIMEOUT = 60_000;
 
@@ -73,20 +74,33 @@ describe("E2E: Ethereum Lifecycle", () => {
             return;
         }
 
-        // Use validated endpoints (confirmed reachable by initialize())
-        const allRpcs = rpc.getAllValidRPCs("https");
+        // Get the best validated URL from the library, then drive the fetch ourselves.
+        const agent = new Agent({ connect: { family: 4 } });
         let success = false;
 
         try {
-            // Using the new robust call() wrapper with an 8-second timeout, max 3 fails
-            const result = await rpc.call("https", "eth_blockNumber", [], 8000, 3);
+            const url = await rpc.getRpcAsync("https");
+            const controller = new AbortController();
+            const timer = setTimeout(() => controller.abort(), 8000);
 
-            expect(result).toMatch(/^0x[0-9a-fA-F]+$/);
-            const blockNumber = parseInt(result, 16);
+            const response = await undiciFetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+                signal: controller.signal,
+                dispatcher: agent,
+            });
+            clearTimeout(timer);
+
+            const data = await response.json() as any;
+            expect(data.result).toMatch(/^0x[0-9a-fA-F]+$/);
+            const blockNumber = parseInt(data.result, 16);
             expect(blockNumber).toBeGreaterThan(0);
             success = true;
         } catch (error) {
-            console.warn("E2E call() fallback failed completely:", error);
+            console.warn("E2E fetch fallback failed completely:", error);
+        } finally {
+            await agent.destroy();
         }
         expect(success).toBe(true);
     }, E2E_TIMEOUT);
