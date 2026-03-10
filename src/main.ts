@@ -1,4 +1,4 @@
-import { assert } from "./tools";
+import { assert } from "./tools.js";
 import * as fs from "fs";
 import * as path from "path";
 import { fetch as undiciFetch, Agent } from "undici";
@@ -10,7 +10,7 @@ import {
   RPCType,
   LoadBalancingStrategy,
   FailureStats,
-} from "./types";
+} from "./types.js";
 
 /**
  * Enhanced RPC class for managing and validating RPC URLs.
@@ -53,14 +53,14 @@ export class RPC {
   private agent: Agent;
   /** True if instance has been destroyed to prevent async leak restarts */
   private isDestroyed: boolean = false;
+  /** Centralized AbortController to cleanly abort pending requests upon destroy */
+  private abortController: AbortController = new AbortController();
 
   /**
    * Promise that resolves when initialization is complete.
    * Used to prevent concurrent initialization.
    */
   private initPromise: Promise<void> | null = null;
-
-  private cachedRpcList: any = null;
 
   private baseHttpUrls: string[] = [];
   private baseWsUrls: string[] = [];
@@ -98,7 +98,7 @@ export class RPC {
     } catch (err) {
       try {
         this.agent.destroy();
-      } catch (e) {}
+      } catch (e) { }
       throw err;
     }
   }
@@ -137,41 +137,6 @@ export class RPC {
     }
   }
 
-  /**
-   * Reads the RPC list file and retrieves RPCs for the given chain ID.
-   * @param chainId - The blockchain chain ID.
-   * @returns A promise resolving to an array of RPC URLs.
-   */
-
-  // private async getChain(chainId: string): Promise<string[]> {
-  //   try {
-  //     const filePath =
-  //       this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
-  //         ? this.pathToRpcJson
-  //         : path.join(__dirname, "rpcList.min.json");
-  //     if (!this.cachedRpcList) {
-  //       const data: string | null = await fs.promises.readFile(
-  //         filePath,
-  //         "utf-8",
-  //       );
-  //       try {
-  //         this.cachedRpcList = JSON.parse(data);
-  //       } catch (error: any) {
-  //         throw new Error(
-  //           `Invalid JSON format in ${filePath}: ${error.message}`,
-  //         );
-  //       }
-  //     }
-
-  //     const result = this.cachedRpcList[chainId];
-  //     if (!result) {
-  //       throw new Error(`Chain ID ${chainId} not found in ${filePath}`);
-  //     }
-  //     return result;
-  //   } catch (error: any) {
-  //     throw new Error(`Error fetching chain RPCs: ${error.message}`);
-  //   }
-  // }
 
   /**
    * Drops a given URL from the RPC list by marking it as failed.
@@ -294,7 +259,7 @@ export class RPC {
    * Initializes RPC lists from the local file, only at Class initialization.
    * @returns void
    */
-  private init() {
+  private init(): void {
     const filePath =
       this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
         ? this.pathToRpcJson
@@ -306,12 +271,15 @@ export class RPC {
       throw new Error(`Chain ID ${this.chainId} not found in RPC list`);
     }
     const ws = chainList[`${formattedChainId}_WS`] || [];
+    this.baseHttpUrls = http || [];
+    this.baseWsUrls = ws || [];
     this.validRPCs = http.map((h: string) => {
       return { url: h, time: 999999999999 };
     });
     this.validWSRPCs = ws.map((w: string) => {
       return { url: w, time: 999999999999 };
     });
+
   }
 
   /**
@@ -341,11 +309,6 @@ export class RPC {
 
     this.initPromise = (async () => {
       try {
-        // const formattedChainId = this.formatChainId(this.chainId);
-        // const http = await this.getChain(formattedChainId);
-        // const ws = await this.getChain(`${formattedChainId}_WS`);
-
-        await this.loadBaseUrls();
         const allUrls = [
           ...this.baseHttpUrls.map((h: string) => ({
             url: h,
@@ -417,10 +380,22 @@ export class RPC {
         // Schedule next initialization (clear any previous timer first)
         if (this.refreshTimer) clearTimeout(this.refreshTimer);
         //jitter
-        const jitter = Math.floor(Math.random() * 2000);
+        const maxJitter = this.ttl * 1000 * 0.2;
+        const jitter = Math.floor(Math.random() * maxJitter);
+
+        const weakThis = new WeakRef(this);
         this.refreshTimer = setTimeout(
-          () => this.initialize(),
-          (this.ttl * 1000),
+          function (wr: WeakRef<RPC>) {
+            const instance = wr.deref();
+
+            // If the user dropped the variable and the GC deleted it, 
+            // 'instance' will be undefined. We just do nothing, and the loop dies!
+            if (instance && !instance.isDestroyed) {
+              instance.initialize();
+            }
+          },
+          (this.ttl * 1000) + jitter,
+          weakThis,
         );
         if (
           this.refreshTimer &&
@@ -432,20 +407,6 @@ export class RPC {
       }
     })();
     return this.initPromise;
-  }
-
-  private async loadBaseUrls(): Promise<void> {
-    if (this.baseHttpUrls.length > 0 && this.baseWsUrls.length > 0) return;
-
-    const filePath =
-      this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
-        ? this.pathToRpcJson
-        : path.join(__dirname, "rpcList.min.json");
-    const data = await fs.promises.readFile(filePath, "utf-8");
-    const parseJson = JSON.parse(data);
-    const formattedChainId = this.formatChainId(this.chainId);
-    this.baseHttpUrls = parseJson[formattedChainId] || [];
-    this.baseWsUrls = parseJson[`${formattedChainId}_WS`] || [];
   }
 
   /**
@@ -503,6 +464,7 @@ export class RPC {
    */
   public destroy(): void {
     this.isDestroyed = true;
+    this.abortController.abort();
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
@@ -510,12 +472,11 @@ export class RPC {
     if (this.agent && typeof this.agent.destroy === "function") {
       try {
         this.agent.destroy();
-      } catch (e) {}
+      } catch (e) { }
     }
     this.validRPCs = [];
     this.validWSRPCs = [];
     this.failedURL.clear();
-    this.cachedRpcList = null;
     if (this.log) {
       console.log("RPC instance destroyed");
     }
@@ -544,6 +505,14 @@ export class RPC {
       () => controller.abort(),
       this.validationTimeout,
     );
+
+    const onAbort = () => controller.abort();
+    if (this.abortController.signal.aborted) {
+      onAbort();
+    } else {
+      this.abortController.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     try {
       if (this.shouldSkipURL(url)) {
         throw new Error(`URL ${url} is in backoff period`);
@@ -571,11 +540,12 @@ export class RPC {
       assert(data.id === id, "ID Mismatch");
       return data;
     } catch (error) {
-      this.drop_(url);
+      if (!this.isDestroyed) this.drop_(url);
       if (this.log) console.error(`HTTP request failed - ${url}: ${error}`);
       throw error;
     } finally {
       clearTimeout(timeout);
+      this.abortController.signal.removeEventListener("abort", onAbort);
     }
   }
 
@@ -603,16 +573,42 @@ export class RPC {
 
         const closeWs = () => {
           try {
+            ws.onopen = null;
+            ws.onmessage = null;
+            ws.onerror = null;
+            ws.onclose = null;
             ws.close();
-          } catch (e) {}
+          } catch (e) { }
+        };
+
+        const onAbort = () => {
+          if (!isResolved) {
+            isResolved = true;
+            clearTimeout(timeout);
+            closeWs();
+            reject(new Error(`RPC instance destroyed`));
+          }
+        };
+
+        if (this.abortController.signal.aborted) {
+          onAbort();
+          return;
+        }
+
+        this.abortController.signal.addEventListener("abort", onAbort, { once: true });
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+          this.abortController.signal.removeEventListener("abort", onAbort);
         };
 
         // Timeout to prevent hanging connections
         const timeout = setTimeout(() => {
           if (!isResolved) {
             isResolved = true;
+            cleanup();
             closeWs();
-            this.drop_(url);
+            if (!this.isDestroyed) this.drop_(url);
             reject(new Error(`WebSocket timeout for ${url}`));
           }
         }, this.validationTimeout); // Dynamic timeout
@@ -635,16 +631,16 @@ export class RPC {
 
             if (!isResolved) {
               isResolved = true;
-              clearTimeout(timeout);
+              cleanup();
               closeWs();
               resolve(data);
             }
           } catch (error) {
             if (!isResolved) {
               isResolved = true;
-              clearTimeout(timeout);
+              cleanup();
               closeWs();
-              this.drop_(url);
+              if (!this.isDestroyed) this.drop_(url);
               reject(error);
             }
           }
@@ -653,9 +649,9 @@ export class RPC {
         ws.onerror = (error) => {
           if (!isResolved) {
             isResolved = true;
-            clearTimeout(timeout);
+            cleanup();
             closeWs();
-            this.drop_(url);
+            if (!this.isDestroyed) this.drop_(url);
             if (this.log) console.error(`WebSocket error for ${url}:`, error);
             reject(new Error(`WebSocket connection failed for ${url}`));
           }
@@ -665,8 +661,8 @@ export class RPC {
           if (!isResolved && event.code !== 1000) {
             // 1000 is normal closure
             isResolved = true;
-            clearTimeout(timeout);
-            this.drop_(url);
+            cleanup();
+            if (!this.isDestroyed) this.drop_(url);
             reject(
               new Error(
                 `WebSocket closed unexpectedly for ${url}: ${event.code}`,
@@ -675,7 +671,7 @@ export class RPC {
           }
         };
       } catch (error) {
-        this.drop_(url);
+        if (!this.isDestroyed) this.drop_(url);
         if (this.log)
           console.error(`Failed to create WebSocket for ${url}:`, error);
         reject(error);

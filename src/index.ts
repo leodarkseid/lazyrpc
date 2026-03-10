@@ -1,2 +1,2 @@
-export { RPC } from "./main";
-export * from "./types";
+export { RPC } from "./main.js";
+export * from "./types.js";

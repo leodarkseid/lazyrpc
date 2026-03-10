@@ -307,11 +307,31 @@ describe("RPC", () => {
       expect(mockFetch).toHaveBeenCalledWith("https://rpc1.com", expect.any(Object));
     });
 
+    // test("records the URL in failedURL map when the network request throws", async () => {
+    //   mockFetch.mockRejectedValueOnce(new Error("Network error"));
+    //   const r = new RPC({ chainId: "0x0001" });
+    //   await expect(r["httpCall"]("https://failing-rpc.com", 1)).rejects.toThrow("Network error");
+    //   expect(r["failedURL"].has("https://failing-rpc.com")).toBe(true);
+    //   r.destroy();
+    // });
     test("records the URL in failedURL map when the network request throws", async () => {
-      mockFetch.mockRejectedValueOnce(new Error("Network error"));
+      // Use mockImplementation to intercept all fetches conditionally
+      mockFetch.mockImplementation(async (url: string) => {
+        if (url === "https://failing-rpc.com") {
+          throw new Error("Network error");
+        }
+        // Return a fake healthy response for the background initialize() loop
+        return {
+          ok: true,
+          json: async () => ({ id: 1, result: "0x1" }),
+        };
+      });
+
       const r = new RPC({ chainId: "0x0001" });
+
       await expect(r["httpCall"]("https://failing-rpc.com", 1)).rejects.toThrow("Network error");
       expect(r["failedURL"].has("https://failing-rpc.com")).toBe(true);
+
       r.destroy();
     });
 

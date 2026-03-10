@@ -1,15 +1,24 @@
 {
   "compilerOptions": {
     "outDir": "./dist",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2020",
     "declaration": true,
     "resolveJsonModule": true,
     "strict": true,
     "isolatedModules": true,
-    "types": ["jest", "node", "@types/jest"]
+    "types": [
+      "jest",
+      "node"
+    ]
   },
-  "include": ["src/**/*", "rpcList.json"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*",
+    "rpcList.json"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
 }
