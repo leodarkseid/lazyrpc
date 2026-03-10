@@ -23,6 +23,16 @@ export interface RPCConfig {
 }
 
 /**
+ * Dependencies injected into the RPC class
+ */
+export interface RPCDependencies {
+  fetchFn: typeof fetch;
+  websocketClass: typeof WebSocket;
+  agent?: any; // HTTP Agent for Node.js (undici)
+  chainList?: Record<string, string[]>; // Parsed JSON chain list
+}
+
+/**
  * RPC endpoint with performance metrics
  */
 export interface RPCEndpoint {

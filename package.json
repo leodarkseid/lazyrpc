@@ -5,8 +5,8 @@
   "type": "module",
   "module": "dist/index.mjs",
   "scripts": {
-    "test": "node --expose-gc ./node_modules/.bin/jest --runInBand",
-    "build": "tsup src/index.ts --format cjs,esm --dts --clean --minify --shims && cp src/rpcList.min.json dist/",
+    "test": "jest --runInBand --forceExit",
+    "build": "tsup src/index.ts src/browser.ts --format cjs,esm --dts --clean --minify --shims && cp src/rpcList.min.json dist/",
     "a": "node test-npm-package/index.js"
   },
   "repository": {
@@ -15,8 +15,18 @@
   },
   "types": "./dist/index.d.ts",
   "exports": {
-    "import": "./dist/index.mjs",
-    "require": "./dist/index.js"
+    "node": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "browser": {
+      "import": "./dist/browser.mjs",
+      "require": "./dist/browser.js"
+    },
+    "default": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
   },
   "keywords": [
     "json-rpc",
@@ -50,6 +60,7 @@
   "devDependencies": {
     "@types/jest": "^29.5.14",
     "@types/node": "^25.3.5",
+    "@types/ws": "^8.18.1",
     "jest": "^29.7.0",
     "ts-jest": "^29.2.6",
     "tsup": "^8.4.0",

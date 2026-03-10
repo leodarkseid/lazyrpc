@@ -1,7 +1,4 @@
 import { assert } from "./tools.js";
-import * as fs from "fs";
-import * as path from "path";
-import { fetch as undiciFetch, Agent } from "undici";
 import {
   RPCConfig,
   RPCEndpoint,
@@ -10,14 +7,15 @@ import {
   RPCType,
   LoadBalancingStrategy,
   FailureStats,
+  RPCDependencies,
 } from "./types.js";
 
 /**
- * Enhanced RPC class for managing and validating RPC URLs.
+ * Enhanced RPC Base class for managing and validating RPC URLs.
  * Handles both HTTP and WebSocket calls, failure tracking, retry logic,
  * load balancing, and exponential backoff.
  */
-export class RPC {
+export class RPCBase {
   /** Time-to-live for RPC validation (in seconds) */
   private ttl: number = 10;
   /** Hex value of Blockchain chain ID */
@@ -49,12 +47,19 @@ export class RPC {
   private validationTimeout: number = 5000;
   /** Handle for the periodic refresh timer */
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
-  /** IPv4-enforced HTTP Agent */
-  private agent: Agent;
+  /** HTTP Agent (Optional) */
+  private agent: any;
   /** True if instance has been destroyed to prevent async leak restarts */
   private isDestroyed: boolean = false;
   /** Centralized AbortController to cleanly abort pending requests upon destroy */
   private abortController: AbortController = new AbortController();
+
+  /** Injected Fetch function */
+  private fetchFn: typeof fetch;
+  /** Injected WebSocket class */
+  private websocketClass: typeof WebSocket;
+  /** Provided chain list object */
+  private chainList: Record<string, string[]> | null = null;
 
   /**
    * Promise that resolves when initialization is complete.
@@ -68,16 +73,11 @@ export class RPC {
   /**
    * Constructor initializes RPC class with configuration options.
    * @param config - Configuration options for chainId, ttl, maxRetry, and other settings.
+   * @param deps - Injected dependencies
    */
-  constructor(config: RPCConfig) {
+  constructor(config: RPCConfig, deps: RPCDependencies) {
     // Validate input parameters
     this.validateConfig(config);
-
-    this.httpCall = this.httpCall.bind(this);
-    this.wsCall = this.wsCall.bind(this);
-    this.drop_ = this.drop_.bind(this);
-    this.drop = this.drop.bind(this);
-    this.getRpc = this.getRpc.bind(this);
 
     this.chainId = config.chainId;
     this.ttl = config.ttl ?? this.ttl;
@@ -89,16 +89,20 @@ export class RPC {
     this.maxBackoffDelay = config.maxBackoffDelay ?? this.maxBackoffDelay;
     this.validationTimeout = config.validationTimeout ?? this.validationTimeout;
 
-    // Explicitly configure dispatcher to only resolve IPv4 to prevent IPv6 blackholes
-    this.agent = new Agent({ connect: { family: 4 } });
+    this.fetchFn = deps.fetchFn;
+    this.websocketClass = deps.websocketClass;
+    this.agent = deps.agent;
+    this.chainList = deps.chainList || null;
 
     try {
       this.init();
       this.initialize();
     } catch (err) {
-      try {
-        this.agent.destroy();
-      } catch (e) { }
+      if (this.agent && typeof this.agent.destroy === "function") {
+        try {
+          this.agent.destroy();
+        } catch (e) { }
+      }
       throw err;
     }
   }
@@ -142,7 +146,7 @@ export class RPC {
    * Drops a given URL from the RPC list by marking it as failed.
    * @param url - The RPC URL to be dropped.
    */
-  public drop(url: string) {
+  public drop = (url: string) => {
     this.drop_(url, 1);
   }
 
@@ -151,7 +155,7 @@ export class RPC {
    * @param url - The failed RPC URL.
    * @param count - The number of retries to add (default: 1).
    */
-  private drop_(url: string, count: number = 1): void {
+  private drop_ = (url: string, count: number = 1): void => {
     const prevFailures = this.failedURL.get(url) ?? {
       count: 0,
       time: Date.now(),
@@ -183,7 +187,7 @@ export class RPC {
    * @returns A valid RPC URL.
    * @throws Error if no valid URLs are found.
    */
-  public getRpc(type: RPCType): string {
+  public getRpc = (type: RPCType): string => {
     if (type !== "https" && type !== "ws") {
       throw new Error(`Invalid RPC type: "${type}". Must be "ws" or "https"`);
     }
@@ -256,15 +260,14 @@ export class RPC {
   }
 
   /**
-   * Initializes RPC lists from the local file, only at Class initialization.
+   * Initializes RPC lists from the injected chain list, only at Class initialization.
    * @returns void
    */
   private init(): void {
-    const filePath =
-      this.pathToRpcJson && fs.existsSync(this.pathToRpcJson)
-        ? this.pathToRpcJson
-        : path.join(__dirname, "rpcList.min.json");
-    const chainList = JSON.parse(fs.readFileSync(filePath, "utf-8"));
+    if (!this.chainList) {
+      throw new Error(`Chain list must be provided to dependencies`);
+    }
+    const chainList = this.chainList;
     const formattedChainId = this.formatChainId(this.chainId);
     const http = chainList[formattedChainId];
     if (!http) {
@@ -307,18 +310,18 @@ export class RPC {
       return this.initPromise;
     }
 
-    this.initPromise = (async () => {
+    this.initPromise = (async (instance: RPCBase) => {
+      if (instance.isDestroyed) {
+        instance.initPromise = null;
+        return;
+      }
+
       try {
-        const allUrls = [
-          ...this.baseHttpUrls.map((h: string) => ({
-            url: h,
-            type: "https" as RPCType,
-          })),
-          ...this.baseWsUrls.map((w: string) => ({
-            url: w,
-            type: "ws" as RPCType,
-          })),
+        const allUrls: { url: string; type: RPCType }[] = [
+          ...instance.baseHttpUrls.map((url) => ({ url, type: "https" as RPCType })),
+          ...instance.baseWsUrls.map((url) => ({ url, type: "ws" as RPCType })),
         ];
+
         // Throttle: validate in batches to avoid overwhelming the network
         const BATCH_SIZE = 10;
 
@@ -327,8 +330,8 @@ export class RPC {
           const batch = allUrls.slice(i, i + BATCH_SIZE);
           const batchResults = await Promise.allSettled(
             batch.map(({ url, type }) =>
-              this.run(
-                type === "https" ? this.httpCall : this.wsCall,
+              instance.run(
+                type === "https" ? (u: string, id: number) => instance.httpCall(u, id) : (u: string, id: number) => instance.wsCall(u, id),
                 url,
                 type,
               ),
@@ -337,7 +340,7 @@ export class RPC {
           for (const result of batchResults) {
             if (result.status === "fulfilled") {
               results.push(result.value);
-            } else if (this.log) {
+            } else if (instance.log) {
               console.warn("RPC validation failed:", result.reason);
             }
           }
@@ -356,56 +359,52 @@ export class RPC {
         // Only replace the lists if we got at least some successes.
         // This prevents total data loss when network is temporarily down.
         if (newHTTP.length > 0) {
-          this.validRPCs = newHTTP;
+          instance.validRPCs = newHTTP;
         }
         if (newWS.length > 0) {
-          this.validWSRPCs = newWS;
+          instance.validWSRPCs = newWS;
         }
 
-        if (this.log) {
+        if (instance.log) {
           console.log(
             `Validated ${newHTTP.length} HTTP and ${newWS.length} WebSocket RPCs`,
           );
         }
       } catch (error) {
-        if (this.log) {
+        if (instance.log) {
           console.error("Error during RPC initialization:", error);
         }
       } finally {
         // critical: unlock the init promise
-        this.initPromise = null;
+        instance.initPromise = null;
 
-        if (this.isDestroyed) return;
+        if (instance.isDestroyed) return;
 
         // Schedule next initialization (clear any previous timer first)
-        if (this.refreshTimer) clearTimeout(this.refreshTimer);
-        //jitter
-        const maxJitter = this.ttl * 1000 * 0.2;
-        const jitter = Math.floor(Math.random() * maxJitter);
+        if (instance.refreshTimer) clearTimeout(instance.refreshTimer);
 
-        const weakThis = new WeakRef(this);
-        this.refreshTimer = setTimeout(
-          function (wr: WeakRef<RPC>) {
-            const instance = wr.deref();
+        const weakThis = new WeakRef(instance);
+        instance.refreshTimer = setTimeout(
+          function () {
+            const ref = weakThis.deref();
 
             // If the user dropped the variable and the GC deleted it, 
             // 'instance' will be undefined. We just do nothing, and the loop dies!
-            if (instance && !instance.isDestroyed) {
-              instance.initialize();
+            if (ref && !ref.isDestroyed) {
+              ref.initialize();
             }
           },
-          (this.ttl * 1000) + jitter,
-          weakThis,
+          instance.ttl * 1000
         );
         if (
-          this.refreshTimer &&
-          typeof this.refreshTimer === "object" &&
-          "unref" in this.refreshTimer
+          instance.refreshTimer &&
+          typeof instance.refreshTimer === "object" &&
+          "unref" in instance.refreshTimer
         ) {
-          this.refreshTimer.unref();
+          instance.refreshTimer.unref();
         }
       }
-    })();
+    })(this);
     return this.initPromise;
   }
 
@@ -477,6 +476,9 @@ export class RPC {
     this.validRPCs = [];
     this.validWSRPCs = [];
     this.failedURL.clear();
+    // Recreate abortController to sever all previous signal event listeners
+    // that might be holding onto closures
+    this.abortController = new AbortController();
     if (this.log) {
       console.log("RPC instance destroyed");
     }
@@ -499,7 +501,7 @@ export class RPC {
    * @param id - Unique request identifier.
    * @returns Promise that resolves with the response data.
    */
-  private async httpCall(url: string, id: number): Promise<any> {
+  private httpCall = async (url: string, id: number): Promise<any> => {
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
@@ -507,10 +509,11 @@ export class RPC {
     );
 
     const onAbort = () => controller.abort();
-    if (this.abortController.signal.aborted) {
+    const ac = this.abortController;
+    if (ac.signal.aborted) {
       onAbort();
     } else {
-      this.abortController.signal.addEventListener("abort", onAbort, { once: true });
+      ac.signal.addEventListener("abort", onAbort, { once: true });
     }
 
     try {
@@ -522,7 +525,7 @@ export class RPC {
         throw new Error("Invalid HTTP URL");
       }
 
-      const response = await undiciFetch(url, {
+      const fetchOptions: any = {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -532,8 +535,13 @@ export class RPC {
           id,
         }),
         signal: controller.signal,
-        dispatcher: this.agent,
-      });
+      };
+
+      if (this.agent) {
+        fetchOptions.dispatcher = this.agent;
+      }
+
+      const response = await this.fetchFn(url, fetchOptions);
 
       assert(response.ok, "Invalid HTTP Response");
       const data: any = await response.json();
@@ -545,7 +553,7 @@ export class RPC {
       throw error;
     } finally {
       clearTimeout(timeout);
-      this.abortController.signal.removeEventListener("abort", onAbort);
+      ac.signal.removeEventListener("abort", onAbort);
     }
   }
 
@@ -555,7 +563,7 @@ export class RPC {
    * @param id - Unique request identifier.
    * @returns Promise that resolves when the WebSocket call is successful.
    */
-  private wsCall(url: string, id: number): Promise<any> {
+  private wsCall = (url: string, id: number): Promise<any> => {
     return new Promise((resolve, reject) => {
       try {
         if (this.shouldSkipURL(url)) {
@@ -568,16 +576,21 @@ export class RPC {
           return;
         }
 
-        const ws = new WebSocket(url);
+        const ws = new this.websocketClass(url);
+        // Bind an initial error handler to catch immediate connection errors
+        ws.onerror = () => {};
+        
         let isResolved = false;
 
         const closeWs = () => {
           try {
+            ws.onerror = () => {}; // Prevent unhandled error if it errors while closing
             ws.onopen = null;
             ws.onmessage = null;
-            ws.onerror = null;
             ws.onclose = null;
-            ws.close();
+            if (ws.readyState === 1 || ws.readyState === 0) { // OPEN or CONNECTING
+               ws.close();
+            }
           } catch (e) { }
         };
 
@@ -590,16 +603,18 @@ export class RPC {
           }
         };
 
-        if (this.abortController.signal.aborted) {
+        const ac = this.abortController;
+
+        if (ac.signal.aborted) {
           onAbort();
           return;
         }
 
-        this.abortController.signal.addEventListener("abort", onAbort, { once: true });
+        ac.signal.addEventListener("abort", onAbort, { once: true });
 
         const cleanup = () => {
           clearTimeout(timeout);
-          this.abortController.signal.removeEventListener("abort", onAbort);
+          ac.signal.removeEventListener("abort", onAbort);
         };
 
         // Timeout to prevent hanging connections

@@ -1,5 +1,6 @@
+import { RPCBase } from "../src/core";
 import { RPC } from "../src/index";
-import * as fs from "fs";
+import fs from "fs";
 
 // ---------------------------------------------------------------------------
 // undici fetch mock — intercepts all internal HTTP validation calls
@@ -22,39 +23,37 @@ jest.mock("undici", () => {
   };
 });
 
-// Enhanced WebSocket mock with proper event handling
-class MockWebSocket {
-  onopen: ((event: Event) => void) | null = null;
-  onmessage: ((event: MessageEvent) => void) | null = null;
-  onerror: ((event: Event) => void) | null = null;
-  onclose: ((event: CloseEvent) => void) | null = null;
-
-  send = jest.fn();
-  close = jest.fn();
-
-  constructor(url: string) {
-    // Simulate successful connection
-    setTimeout(() => {
-      if (this.onopen) {
-        this.onopen(new Event('open'));
-      }
-    }, 10);
-
-    // Simulate message response after send is called
-    this.send = jest.fn(() => {
+jest.mock("ws", () => {
+  class MockWebSocket {
+    onopen: ((event: Event) => void) | null = null;
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: Event) => void) | null = null;
+    onclose: ((event: CloseEvent) => void) | null = null;
+  
+    send = jest.fn();
+    close = jest.fn();
+  
+    constructor(url: string) {
       setTimeout(() => {
-        if (this.onmessage) {
-          this.onmessage({
-            data: JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x10" })
-          } as MessageEvent);
-        }
-      }, 20);
-    });
+        if (this.onopen) this.onopen(new Event('open'));
+      }, 10);
+  
+      this.send = jest.fn(() => {
+        setTimeout(() => {
+          if (this.onmessage) {
+            this.onmessage({
+              data: JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x10" })
+            } as MessageEvent);
+          }
+        }, 20);
+      });
+    }
   }
-}
+  return { WebSocket: MockWebSocket };
+});
 
+const { WebSocket: MockWebSocket } = require("ws");
 global.WebSocket = MockWebSocket as any;
-
 // Mock file system — use the SAME data for both sync and async reads
 // so init() and initialize() produce consistent results.
 const mockRpcData = {
@@ -93,7 +92,7 @@ describe("RPC", () => {
 
   beforeEach(() => {
     jest.useFakeTimers();
-    initializeSpy = jest.spyOn(RPC.prototype as any, "initialize");
+    initializeSpy = jest.spyOn(RPCBase.prototype as any, "initialize");
     rpc = new RPC({ chainId: "0x0001", ttl: 5, maxRetry: 3 });
   });
 
@@ -354,12 +353,14 @@ describe("RPC", () => {
         close = jest.fn();
         constructor(_url: string) { }
       };
-      const original = global.WebSocket;
-      global.WebSocket = SilentWebSocket as any;
-      const r = new RPC({ chainId: "0x0001" });
+      const r = new RPCBase({ chainId: "0x0001" }, {
+        fetchFn: fetch,
+        websocketClass: SilentWebSocket as any,
+        chainList: { "x0001": ["https://rpc.com"], "x0001_WS": ["wss://hanging-ws.com"] },
+        agent: undefined
+      });
       await expect(r["wsCall"]("wss://hanging-ws.com", 1)).rejects.toThrow("WebSocket timeout");
       r.destroy();
-      global.WebSocket = original;
       jest.useFakeTimers();
     }, 15000);
   });

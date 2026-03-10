@@ -56,6 +56,7 @@ describe("Strict Network Resilience and IP Routing", () => {
             expect(duration).toBeLessThan(1500);
 
             await agent.destroy();
+            await rpc['agent']?.destroy();
             rpc.destroy();
         }, TEST_TIMEOUT);
 
@@ -84,7 +85,9 @@ describe("Strict Network Resilience and IP Routing", () => {
             expect(duration).toBeLessThan(1500);
 
             await agent.destroy();
+            await rpc['agent']?.destroy();
             rpc.destroy();
+            await new Promise(resolve => setTimeout(resolve, 100));
         }, TEST_TIMEOUT);
     });
 
@@ -194,10 +197,23 @@ describe("Strict Network Resilience and IP Routing", () => {
             expect(ipv6Hits).toBe(0);
 
             await agent.destroy();
+            await rpc['agent']?.destroy();
             rpc.destroy();
 
             // Force garbage collection of undici sockets so Jest can exit cleanly
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise(resolve => setTimeout(resolve, 200));
         }, 15000);
+    });
+
+    afterAll(async () => {
+        // Destroy global dispatcher if fetch accidentally leaked to it
+        const { getGlobalDispatcher } = require('undici');
+        const dispatcher = getGlobalDispatcher();
+        if (dispatcher && typeof dispatcher.destroy === 'function') {
+            await dispatcher.destroy();
+        }
+        
+        // Allow all residual Undici TCPWRAPs to fully close before exiting Jest
+        await new Promise(resolve => setTimeout(resolve, 500));
     });
 });
