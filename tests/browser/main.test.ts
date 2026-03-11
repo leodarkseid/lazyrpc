@@ -2,10 +2,8 @@ import { RPCBase } from "../../src/core";
 
 // Mock the json module BEFORE importing RPC!
 jest.mock("../../src/rpcList.min.json", () => ({
-  default: {
-    "x0001": ["https://rpc1.com", "https://rpc2.com"],
-    "x0001_WS": ["wss://ws1.com", "wss://ws2.com"]
-  }
+  "x0001": ["https://rpc1.com", "https://rpc2.com"],
+  "x0001_WS": ["wss://ws1.com", "wss://ws2.com"]
 }), { virtual: true });
 
 import { RPC } from "../../src/browser";
