@@ -1,15 +1,22 @@
-// Node 18+ natively supports Blob and File via the buffer module
+// Node 18+ natively supports Blob and File via the buffer module, but lacks String.prototype.toWellFormed
+if (typeof String.prototype.toWellFormed === 'undefined') {
+  String.prototype.toWellFormed = function() {
+    return String(this); // our test payloads are well-formed, so naive polyfill prevents Undici crash
+  };
+}
 
-const { Blob, File } = require('buffer');
-// FormData is natively available globally in Node 18+, but if Jest stripped it:
-const { FormData } = require('undici'); // Wait, FormData is safe from undici, but File/Blob were the crashes.
+const { Blob, File } = require('node:buffer');
 
+// 1. We MUST attach File and Blob to the global scope FIRST.
 if (typeof global.Blob === 'undefined') {
-  global.Blob = Blob || require('node:buffer').Blob;
+  global.Blob = Blob;
 }
 if (typeof global.File === 'undefined') {
-  global.File = File || require('node:buffer').File;
+  global.File = File;
 }
+
+// 2. NOW it is safe to require undici, because it will see global.File
+const { FormData } = require('undici');
 if (typeof global.FormData === 'undefined') {
-  global.FormData = typeof FormData !== 'undefined' ? FormData : class FormData {};
+  global.FormData = FormData;
 }
