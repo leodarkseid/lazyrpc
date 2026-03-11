@@ -9,6 +9,7 @@ import { RPCConfig, RPCDependencies } from "./types.js";
  * Enhanced Node.js RPC class for managing and validating RPC URLs.
  */
 export class RPC extends RPCBase {
+  
   /**
    * Constructor initializes RPC class with Node.js optimized dependencies.
    * @param config - Configuration options for chainId, ttl, maxRetry, and other settings.
