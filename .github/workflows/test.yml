@@ -31,4 +31,4 @@ jobs:
         run: npm run build
 
       - name: Run tests (with memory tracking)
-        run: node --expose-gc ./node_modules/.bin/jest --runInBand
+        run: jest --runInBand --forceExit
