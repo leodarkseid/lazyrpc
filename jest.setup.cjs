@@ -1,9 +1,11 @@
-if (typeof File === 'undefined') {
-  global.File = class File {};
+const { File, Blob, FormData } = require('undici');
+
+if (typeof global.File === 'undefined') {
+  global.File = File || class File {};
 }
-if (typeof Blob === 'undefined') {
-  global.Blob = class Blob {};
+if (typeof global.Blob === 'undefined') {
+  global.Blob = Blob || class Blob {};
 }
-if (typeof FormData === 'undefined') {
-  global.FormData = class FormData {};
+if (typeof global.FormData === 'undefined') {
+  global.FormData = FormData || class FormData {};
 }
