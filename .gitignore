@@ -2,7 +2,6 @@ node_modules
 /node_modules
 /dist
 /src/run.ts
-package-lock.json
 demo.mjs
 *.log
 .DS_Store
