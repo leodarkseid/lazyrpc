@@ -1,5 +1,4 @@
 # LAZY RPC
-# LAZY RPC
 ![NPM Version](https://img.shields.io/npm/v/lazy-rpc)
 ![License](https://img.shields.io/npm/l/lazy-rpc)
 ![Bundle Size](https://img.shields.io/bundlephobia/minzip/lazy-rpc)
