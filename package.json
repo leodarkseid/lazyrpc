@@ -1,7 +1,7 @@
 {
   "name": "lazy-rpc",
   "version": "1.1.0",
-  "main": "dist/index.js",
+  "main": "dist/index.cjs",
   "type": "module",
   "scripts": {
     "test": "node --expose-gc ./node_modules/.bin/jest --runInBand",
@@ -16,18 +16,18 @@
   "exports": {
     "node": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     },
     "browser": {
       "types": "./dist/browser.d.ts",
-      "import": "./dist/browser.mjs",
-      "require": "./dist/browser.js"
+      "import": "./dist/browser.js",
+      "require": "./dist/browser.cjs"
     },
     "default": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
   "keywords": [
