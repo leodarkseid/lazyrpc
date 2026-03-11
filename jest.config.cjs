@@ -1,11 +1,27 @@
 /** @type {import('ts-jest').JestConfigWithTsJest} **/
 module.exports = {
-  testEnvironment: "node",
-  roots: ["<rootDir>/tests"],
-  transform: {
-    "^.+\\.tsx?$": ["ts-jest", {}],
-  },
-  moduleNameMapper: {
-    "^(\\.{1,2}/.*)\\.js$": "$1",
-  },
+  projects: [
+    {
+      displayName: "node",
+      testEnvironment: "node",
+      testMatch: ["<rootDir>/tests/node/**/*.test.ts"],
+      transform: {
+        "^.+\\.tsx?$": ["ts-jest", {}],
+      },
+      moduleNameMapper: {
+        "^(\\.{1,2}/.*)\\.js$": "$1",
+      },
+    },
+    {
+      displayName: "browser",
+      testEnvironment: "jsdom",
+      testMatch: ["<rootDir>/tests/browser/**/*.test.ts"],
+      transform: {
+        "^.+\\.tsx?$": ["ts-jest", {}],
+      },
+      moduleNameMapper: {
+        "^(\\.{1,2}/.*)\\.js$": "$1",
+      },
+    },
+  ],
 };

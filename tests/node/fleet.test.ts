@@ -1,4 +1,4 @@
-import { RPC } from "../src/index"; 
+import { RPC } from "../../src/index";
 import * as http from "http";
 import * as fs from "fs";
 import * as path from "path";

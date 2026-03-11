@@ -1,4 +1,4 @@
-import { RPC } from "../src/index";
+import { RPC } from "../../src/index";
 import * as http from "http";
 import { fetch as undiciFetch, Agent } from "undici";
 
@@ -36,28 +36,31 @@ describe("Strict Network Resilience and IP Routing", () => {
 
             // Ask the library for the best URL then attempt the fetch ourselves.
             const start = Date.now();
-            const url = await rpc.getRpcAsync("https").catch(() => "http://192.0.2.1");
-            const controller = new AbortController();
-            const timer = setTimeout(() => controller.abort(), 500);
-            await expect(
-                undiciFetch(url, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
-                    signal: controller.signal,
-                    dispatcher: agent,
-                })
-            ).rejects.toThrow();
-            clearTimeout(timer);
-            const duration = Date.now() - start;
+            let duration = 0;
+            try {
+                const url = await rpc.getRpcAsync("https").catch(() => "http://192.0.2.1");
+                const controller = new AbortController();
+                const timer = setTimeout(() => controller.abort(), 500);
+                await expect(
+                    undiciFetch(url, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
+                        signal: controller.signal,
+                        dispatcher: agent,
+                    })
+                ).rejects.toThrow();
+                clearTimeout(timer);
+                duration = Date.now() - start;
 
-            // Execution should escape significantly faster than the OS TCP timeout (~60s),
-            // and should map closely to our 500ms validationTimeout (with small margin for runtime)
-            expect(duration).toBeLessThan(1500);
-
-            await agent.destroy();
-            await rpc['agent']?.destroy();
-            rpc.destroy();
+                // Execution should escape significantly faster than the OS TCP timeout (~60s),
+                // and should map closely to our 500ms validationTimeout (with small margin for runtime)
+                expect(duration).toBeLessThan(1500);
+            } finally {
+                await agent.destroy();
+                await rpc['agent']?.destroy();
+                rpc.destroy();
+            }
         }, TEST_TIMEOUT);
 
         test("abort requests to a blackhole IPv6 address ([2001:db8::1]) without stalling", async () => {
@@ -212,7 +215,7 @@ describe("Strict Network Resilience and IP Routing", () => {
         if (dispatcher && typeof dispatcher.destroy === 'function') {
             await dispatcher.destroy();
         }
-        
+
         // Allow all residual Undici TCPWRAPs to fully close before exiting Jest
         await new Promise(resolve => setTimeout(resolve, 500));
     });

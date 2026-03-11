@@ -1,11 +1,10 @@
 {
   "name": "lazy-rpc",
-  "version": "1.0.3",
+  "version": "1.1.0",
   "main": "dist/index.js",
   "type": "module",
-  "module": "dist/index.mjs",
   "scripts": {
-    "test": "jest --runInBand --forceExit",
+    "test": "node --expose-gc ./node_modules/.bin/jest --runInBand",
     "build": "tsup src/index.ts src/browser.ts --format cjs,esm --dts --clean --minify --shims && cp src/rpcList.min.json dist/",
     "a": "node test-npm-package/index.js"
   },
@@ -16,14 +15,17 @@
   "types": "./dist/index.d.ts",
   "exports": {
     "node": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     },
     "browser": {
+      "types": "./dist/browser.d.ts",
       "import": "./dist/browser.mjs",
       "require": "./dist/browser.js"
     },
     "default": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
     }
@@ -62,10 +64,14 @@
     "@types/node": "^25.3.5",
     "@types/ws": "^8.18.1",
     "jest": "^29.7.0",
+    "jest-environment-jsdom": "^30.3.0",
     "ts-jest": "^29.2.6",
     "tsup": "^8.4.0",
     "typescript": "^5.8.2",
     "ws": "^8.19.0"
+  },
+  "peerDependencies": {
+    "ws": "^8.0.0"
   },
   "dependencies": {
     "undici": "^7.22.0"

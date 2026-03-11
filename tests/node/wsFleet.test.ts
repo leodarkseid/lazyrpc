@@ -1,4 +1,4 @@
-import { RPC } from "../src/index"; // Adjust path as needed
+import { RPC } from "../../src/index"; // Adjust path as needed
 import { WebSocketServer, WebSocket } from "ws";
 import * as fs from "fs";
 import * as path from "path";

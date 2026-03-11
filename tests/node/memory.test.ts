@@ -1,4 +1,4 @@
-import { RPC } from "../src/index";
+import { RPC } from "../../src/index";
 
 describe("RPC Memory & Garbage Collection Tests", () => {
 

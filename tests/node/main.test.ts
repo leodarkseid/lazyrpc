@@ -1,5 +1,5 @@
-import { RPCBase } from "../src/core";
-import { RPC } from "../src/index";
+import { RPCBase } from "../../src/core";
+import { RPC } from "../../src/index";
 import fs from "fs";
 
 // ---------------------------------------------------------------------------
@@ -29,15 +29,15 @@ jest.mock("ws", () => {
     onmessage: ((event: MessageEvent) => void) | null = null;
     onerror: ((event: Event) => void) | null = null;
     onclose: ((event: CloseEvent) => void) | null = null;
-  
+
     send = jest.fn();
     close = jest.fn();
-  
+
     constructor(url: string) {
       setTimeout(() => {
         if (this.onopen) this.onopen(new Event('open'));
       }, 10);
-  
+
       this.send = jest.fn(() => {
         setTimeout(() => {
           if (this.onmessage) {

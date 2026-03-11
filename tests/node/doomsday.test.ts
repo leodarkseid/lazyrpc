@@ -1,4 +1,4 @@
-import { RPC } from "../src/index";
+import { RPC } from "../../src/index";
 import * as http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import * as fs from "fs";
