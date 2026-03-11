@@ -1,4 +1,5 @@
 // Node 18+ natively supports Blob and File via the buffer module
+
 const { Blob, File } = require('buffer');
 // FormData is natively available globally in Node 18+, but if Jest stripped it:
 const { FormData } = require('undici'); // Wait, FormData is safe from undici, but File/Blob were the crashes.
