@@ -20,17 +20,22 @@ const VALIDATION_TIMEOUT = 3000;
 const E2E_TIMEOUT = 30_000;
 
 /**
- * Wait for the RPC instance to validate at least one HTTP endpoint.
- * Uses getRpcAsync — the native async queue mechanism.
- * Returns true if validated, false if timed out or all endpoints failed.
+ * Wait for the RPC instance to finish its initialize() cycle and
+ * populate validRPCs with at least one HTTP endpoint.
+ *
+ * Polls getValidRPCCount directly rather than using getRpcAsync,
+ * because getRpcAsync resolves mid-batch (as soon as one URL validates)
+ * but validRPCs is only written after ALL batches complete.
+ *
+ * Returns true if at least one endpoint validated, false on timeout.
  */
 async function waitForValidation(rpc: RPC, timeoutMs = 15_000): Promise<boolean> {
-    try {
-        await rpc.getRpcAsync("https", timeoutMs);
-        return true;
-    } catch {
-        return false;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        if (rpc.getValidRPCCount("https") > 0) return true;
+        await new Promise(r => setTimeout(r, 200));
     }
+    return false;
 }
 
 // ═══════════════════════════════════════════════════════════════════

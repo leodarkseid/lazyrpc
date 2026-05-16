@@ -143,7 +143,7 @@ When called before any URL has been validated:
 3. The **instant** the first URL in any batch validates successfully, all queued promises resolve with that URL
 4. No waiting for the full URL list — first result wins
 
-When called after URLs are already validated, it returns immediately via `getRpc()` with full load balancing applied.
+When called after URLs are already validated, it returns immediately via `getRpc()` with the selected strategy for load balancing applied.
 
 ```typescript
 // All three callers resolve as soon as the first URL validates

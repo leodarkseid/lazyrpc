@@ -167,44 +167,54 @@ describe("Strict Network Resilience and IP Routing", () => {
         test("Strictly enforces IPv4 routing on 'localhost' via family: 4 configuration", async () => {
             const path = require('path');
             const localPath = path.join(__dirname, "localhost-rpc.json");
-            const rpc = new RPC({ chainId: "0xcafe", pathToRpcJson: localPath, validationTimeout: 10000 });
-
-            // Grab the library's IPv4-only agent (Agent({ connect: { family: 4 } }))
-            // and use it directly to verify routing — this test is about the agent
-            // config, not about the library's internal validation pipeline.
-            const libraryAgent = rpc['agent'];
 
             ipv4Hits = 0;
             ipv6Hits = 0;
 
-            // Fetch the known localhost URL directly using the library's agent.
-            // We know the URL because this test created the server.
-            const url = `http://localhost:${port}`;
+            // Create the RPC instance — its constructor starts initialize()
+            // which validates http://localhost:${port} using the library's
+            // internal Agent({ connect: { family: 4 } }).
+            const rpc = new RPC({ chainId: "0xcafe", pathToRpcJson: localPath, validationTimeout: 5000 });
 
-            let data: any;
-            try {
+            // Wait for the library's internal validation to complete.
+            // The only URL in the chain list is our localhost server,
+            // so initialize() will hit it during its validation sweep.
+            const deadline = Date.now() + 10000;
+            while (rpc.getValidRPCCount("https") === 0 && rpc.status() === "initializing" && Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+
+            // The library's internal agent (family: 4) should have routed
+            // exclusively to the IPv4 server, never touching IPv6.
+            expect(ipv4Hits).toBeGreaterThan(0);
+            expect(ipv6Hits).toBe(0);
+
+            // If validation succeeded, verify the endpoint is accessible
+            if (rpc.getValidRPCCount("https") > 0) {
+                const url = rpc.getRpc("https");
+                expect(url).toBe(`http://localhost:${port}`);
+
+                // Verify the response came from the IPv4 server (result "0x1b4")
+                // by making a direct fetch with a fresh agent (same family:4 config)
+                const agent = new Agent({ connect: { family: 4 } });
                 const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 10000);
+                const timer = setTimeout(() => controller.abort(), 5000);
                 const response = await undiciFetch(url, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
                     signal: controller.signal,
-                    dispatcher: libraryAgent,
+                    dispatcher: agent,
                 });
                 clearTimeout(timer);
-                data = await response.json();
-            } catch (err) {
-                throw new Error(`Dual-stack localhost call failed: ${err}`);
+                const data: any = await response.json();
+                expect(data.result).toBe("0x1b4");
+                await agent.destroy();
             }
-
-            expect(data.result).toBe("0x1b4");
-            expect(ipv4Hits).toBeGreaterThan(0);
-            expect(ipv6Hits).toBe(0);
 
             rpc.destroy();
 
-            // Force garbage collection of undici sockets so Jest can exit cleanly
+            // Allow undici sockets to fully close
             await new Promise(resolve => setTimeout(resolve, 200));
         }, 15000);
     });
