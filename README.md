@@ -420,6 +420,19 @@ Failed RPCs are stripped from the active pool and automatically paced in a backo
 
 Failed RPCs completely reset after 6 hours, allowing for node recovery from protracted outages natively.
 
+## Security & Supply Chain Protection
+
+Lazy RPC is architected to be fundamentally immune to Remote Code Execution (RCE) and malicious payload injection via spoofed endpoints or compromised custom JSON files.
+
+- **No Code Execution (`eval`-free)**: The library never evaluates or executes the responses it receives. It uses strict, native V8 data parsers (`response.json()` and `JSON.parse()`) which are incapable of executing JavaScript or downloading binaries.
+- **Strict Payload Validation**: During background validation, the library strictly enforces the JSON-RPC 2.0 specification. It uses Regex (`/^0x[0-9a-fA-F]+$/`) to guarantee the result is an exact hex string.
+- **Syntax-Error Trapping**: If a spoofed server attempts to return a malicious JavaScript file, an HTML payload, or a bash script, the parsing engine instantly throws a `SyntaxError` (e.g., `Unexpected token < in JSON`). The library gracefully catches this, drops the compromised URL into the penalty box, and never passes it to your app.
+- **Data-Only Returns**: The library's core responsibility is returning a validated **String** (the URL) to the developer's application. It never downloads files, streams arbitrary payloads, or writes to the filesystem during its runtime operations.
+- **ReDoS Immunity**: The only Regex used for validation (`/^0x[0-9a-fA-F]+$/`) is strictly bounded, making it mathematically immune to catastrophic backtracking and Regex Denial of Service attacks.
+- **Zero Prototype Pollution**: The library natively merges custom RPC endpoints into flat arrays and iterates over them directly. It does not perform recursive deep-merging on nested objects, completely nullifying prototype pollution attack vectors.
+- **Path Traversal Protection**: If user input is accidentally passed to the `pathToRpcJson` option, the library enforces `JSON.parse()` immediately after reading the file. Standard system files (like `/etc/passwd`) are not valid JSON, causing the parser to instantly crash and preventing file contents from being loaded into memory or leaked back to an attacker.
+- **SSRF Mitigation**: The library inherently protects against typical GET-based SSRF because all validation pings are executed as strict `POST` requests with a fixed `{"method": "eth_blockNumber"}` JSON body. It never echoes the HTTP response body back to the consumer, utilizing it strictly for internal latency benchmarking.
+
 ## License
 
 This project is licensed under the MIT License.
