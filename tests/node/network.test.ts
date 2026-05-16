@@ -174,12 +174,20 @@ describe("Strict Network Resilience and IP Routing", () => {
             ipv4Hits = 0;
             ipv6Hits = 0;
 
-            // Ask the library for the best validated URL, then drive the fetch ourselves.
-            // The library's internal agent (family: 4) ensures validation only contacts IPv4,
-            // and we use the same family here so the actual call follows the same path.
+            // Wait for the library's async validation to populate validRPCs.
+            // We poll getValidRPCCount instead of using getRpcAsync to avoid a
+            // race between initialize()'s finally-block queue drain and the
+            // queue entry creation (localhost responds near-instantly).
+            const deadline = Date.now() + 10000;
+            while (rpc.getValidRPCCount("https") === 0 && Date.now() < deadline) {
+                await new Promise(r => setTimeout(r, 50));
+            }
+
+            expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
+            const url = rpc.getRpc("https");
+
             let data: any;
             try {
-                const url = await rpc.getRpcAsync("https");
                 const controller = new AbortController();
                 const timer = setTimeout(() => controller.abort(), 10000);
                 const response = await undiciFetch(url, {
