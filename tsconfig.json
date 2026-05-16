@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    "outDir": "./dist",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2021",
+    "declaration": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "isolatedModules": true,
+    "types": [
+      "jest",
+      "node"
+    ],
+    "esModuleInterop": true
+  },
+  "include": [
+    "src/**/*",
+    "rpcList.json"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

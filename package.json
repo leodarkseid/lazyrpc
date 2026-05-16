@@ -1,0 +1,79 @@
+{
+  "name": "lazy-rpc",
+  "version": "1.2.1",
+  "main": "dist/index.cjs",
+  "type": "module",
+  "scripts": {
+    "test": " ",
+    "build": "tsup src/index.ts src/browser.ts --format cjs,esm --dts --clean --minify --shims && cp src/rpcList.min.json dist/",
+    "a": "node test-npm-package/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leodarkseid/lazyrpc.git"
+  },
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "node": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "browser": {
+      "types": "./dist/browser.d.ts",
+      "import": "./dist/browser.js",
+      "require": "./dist/browser.cjs"
+    },
+    "default": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "keywords": [
+    "json-rpc",
+    "ethereum",
+    "evm",
+    "https",
+    "websocket",
+    "url",
+    "blockchain",
+    "polygon",
+    "arbitrum",
+    "optimism",
+    "base",
+    "bsc",
+    "avalanche",
+    "load-balancing",
+    "failover",
+    "retry-logic",
+    "typescript"
+  ],
+  "author": {
+    "email": "leodarkseid@gmail.com",
+    "name": "Leo",
+    "url": "https://badmuskolade.com"
+  },
+  "license": "MIT",
+  "description": "Production-ready RPC management library with load balancing, exponential backoff, and support for 15+ EVM chains. Features TypeScript-first design, WebSocket support, and intelligent failure handling.",
+  "files": [
+    "/dist"
+  ],
+  "devDependencies": {
+    "@types/jest": "^29.5.14",
+    "@types/node": "^25.3.5",
+    "@types/ws": "^8.18.1",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^30.3.0",
+    "ts-jest": "^29.2.6",
+    "tsup": "^8.4.0",
+    "typescript": "^5.8.2",
+    "ws": "^8.19.0"
+  },
+  "peerDependencies": {
+    "ws": "^8.0.0"
+  },
+  "dependencies": {
+    "undici": "^7.24.6"
+  }
+}
