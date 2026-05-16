@@ -424,7 +424,7 @@ describe("RPC", () => {
       await jest.advanceTimersByTimeAsync(600);
       const err:any = await result;
       expect(err).toBeInstanceOf(Error);
-      expect(err.message).toContain("Timeout of 500ms exceeded for https RPC");
+      expect(err.message).toContain("Failed To Find A Valid RPC");
       r.destroy();
     });
 

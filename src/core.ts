@@ -518,6 +518,12 @@ export class RPCBase {
         ) {
           instance.refreshTimer.unref();
         }
+        // clear out queue for getRpc async
+        for (const entry of instance.getRpcAsyncQueue) {
+          clearTimeout(entry.timer!)
+          entry.reject(new Error("Failed To Find A Valid RPC"))
+        }
+        instance.getRpcAsyncQueue.clear()
       }
     })(this);
     return this.initPromise;

@@ -247,12 +247,14 @@ describe("E2E: Multi-Chain", () => {
         ["Optimism", "0xa"],
         ["Base", "0x2105"],
         ["Avalanche C-Chain", "0xa86a"],
-    ])("should have %s (chainId %s) endpoints via init", (_name, chainId) => {
+    ])("should have %s (chainId %s) endpoints via init", async (_name, chainId) => {
         // Verifies the library can read the RPC list for this chain
         // and provide endpoints synchronously via init().
         // We do NOT wait for async validation here (it would be too slow
         // across 6 chains in sequence).
         const rpc = new RPC({ chainId, ttl: 3600 });
+
+        await waitForValidation(rpc);
 
         const count = rpc.getValidRPCCount("https");
         expect(count).toBeGreaterThan(0);
@@ -264,7 +266,7 @@ describe("E2E: Multi-Chain", () => {
         expect(wsCount).toBeGreaterThan(0);
 
         rpc.destroy();
-    });
+    }, E2E_TIMEOUT);
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -281,6 +283,7 @@ describe("E2E: Error Handling & Cleanup", () => {
 
     test("destroy should wipe all state", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600 });
+        await waitForValidation(rpc);
         expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
 
         rpc.destroy();
@@ -289,7 +292,7 @@ describe("E2E: Error Handling & Cleanup", () => {
         expect(rpc.getValidRPCCount("ws")).toBe(0);
         expect(rpc.getFailureStats().totalFailed).toBe(0);
         expect(() => rpc.getRpc("https")).toThrow("No valid https URLs found");
-    });
+    }, E2E_TIMEOUT);
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -300,8 +303,9 @@ describe("E2E: pathToRpcJson", () => {
     const CUSTOM_LIST = path.resolve(__dirname, "../fixtures/custom-rpc-list.json");
     const INVALID_LIST = path.resolve(__dirname, "../fixtures/invalid-rpc-list.json");
 
-    test("should load endpoints from a custom JSON file", () => {
+    test("should load endpoints from a custom JSON file", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, pathToRpcJson: CUSTOM_LIST });
+        await waitForValidation(rpc);
 
         // The custom file has exactly 2 HTTP + 1 WS endpoint
         expect(rpc.getValidRPCCount("https")).toBe(2);
@@ -314,21 +318,22 @@ describe("E2E: pathToRpcJson", () => {
         expect(wsUrl).toBe("wss://ethereum-rpc.publicnode.com");
 
         rpc.destroy();
-    });
+    }, E2E_TIMEOUT);
 
-    test("should fall back to bundled list when path does not exist", () => {
+    test("should fall back to bundled list when path does not exist", async () => {
         const rpc = new RPC({
             chainId: "0x0001",
             ttl: 3600,
             pathToRpcJson: "/tmp/does-not-exist-at-all.json",
         });
+        await waitForValidation(rpc);
 
         // Falls back to bundled rpcList.min.json which has many endpoints
         const count = rpc.getValidRPCCount("https");
         expect(count).toBeGreaterThan(2); // bundled list has 50+ for Ethereum
 
         rpc.destroy();
-    });
+    }, E2E_TIMEOUT);
 
     // test("pathToRpcJson: should fall back to internal lists if unreadable", async () => {
     //   // It does NOT throw if it's falling back to an internal list by default behavior.
@@ -352,7 +357,7 @@ describe("E2E: pathToRpcJson", () => {
     //   if (rpc) rpc.destroy();
     // });
 
-    test("should throw when custom file lacks the requested chain", () => {
+    test("should throw when custom file lacks the requested chain", async () => {
         // custom-rpc-list.json only has x0001 — Polygon (0x89) is absent
         expect(() => {
             const rpc = new RPC({ chainId: "0x89", pathToRpcJson: CUSTOM_LIST });
@@ -360,13 +365,14 @@ describe("E2E: pathToRpcJson", () => {
         }).toThrow();
     });
 
-    test("custom path endpoints should work with all load balancing strategies", () => {
+    test("custom path endpoints should work with all load balancing strategies", async () => {
         const rpc = new RPC({
             chainId: "0x0001",
             ttl: 3600,
             pathToRpcJson: CUSTOM_LIST,
             loadBalancing: "round-robin",
         });
+        await waitForValidation(rpc);
 
         const url1 = rpc.getRpc("https");
         const url2 = rpc.getRpc("https");
@@ -376,7 +382,7 @@ describe("E2E: pathToRpcJson", () => {
         expect(url3).toBe(url1);     // round-robin wraps
 
         rpc.destroy();
-    });
+    }, E2E_TIMEOUT);
 
     test("custom path endpoints should validate via initialize()", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, pathToRpcJson: CUSTOM_LIST });

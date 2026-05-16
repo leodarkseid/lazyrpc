@@ -40,8 +40,8 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
 
         // Dead 3: Instantly closes the connection upon receiving a message
         wsUrls.WsClose = await new Promise<string>((resolve) => {
-            const wss = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
-            wss.on('connection', (ws) => {
+            const wss:any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
+            wss.on('connection', (ws:any) => {
                 ws.on('message', () => ws.close(1011, "Internal Error"));
             });
             wsServers.push(wss);
@@ -49,8 +49,8 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
 
         // Dead 4: The WS Blackhole. Accepts message but NEVER responds.
         wsUrls.WsHang = await new Promise<string>((resolve) => {
-            const wss = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
-            wss.on('connection', (ws) => {
+            const wss:any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
+            wss.on('connection', (ws:any) => {
                 ws.on('message', () => { /* Silence */ });
             });
             wsServers.push(wss);
@@ -102,7 +102,7 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
         results.forEach((url: any) => {
             expect(url.status).toBe("rejected");
             expect(url.reason).toBeInstanceOf(Error);
-            expect(url.reason).toStrictEqual(new Error("All https URLs are currently failing or in backoff"));
+            expect(url.reason).toStrictEqual(new Error("Failed To Find A Valid RPC"));
         })
 
 
@@ -125,7 +125,7 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
         results.forEach((url: any) => {
             expect(url.status).toBe("rejected");
             expect(url.reason).toBeInstanceOf(Error);
-            expect(url.reason).toStrictEqual(new Error("All ws URLs are currently failing or in backoff"));
+            expect(url.reason).toStrictEqual(new Error("Failed To Find A Valid RPC"));
         })
 
         rpc.destroy();
