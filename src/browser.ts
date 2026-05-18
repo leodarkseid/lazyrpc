@@ -1,6 +1,6 @@
-import { RPCBase } from "./core.js";
 import { RPCConfig, RPCDependencies } from "./types.js";
 import rpcList from "./rpcList.min.json" assert { type: "json" };
+import { RPCBase } from "./core/rpcBase.js";
 
 /**
  * Enhanced Browser RPC class for managing and validating RPC URLs.

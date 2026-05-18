@@ -92,6 +92,8 @@ describe("URL Oracle: Fleet Racing and Dynamic Failover", () => {
       srv.closeAllConnections();
       await new Promise<void>((resolve) => srv.close(() => resolve()));
     }
+
+    jest.useRealTimers();
   });
 
   test("Manual Refresh: Oracle accurately tracks shifting latencies over 10 rounds", async () => {
@@ -103,6 +105,7 @@ describe("URL Oracle: Fleet Racing and Dynamic Failover", () => {
       pathToRpcJson: jsonPath,
       validationTimeout: 1000,
       ttl: 600, // High TTL so we purely test the manual refresh
+      enforceHttps: false 
     });
 
     // The expected winners for the 10 rounds based on the latency arrays above
@@ -147,6 +150,7 @@ describe("URL Oracle: Fleet Racing and Dynamic Failover", () => {
       pathToRpcJson: jsonPath,
       validationTimeout: 1000,
       ttl: 1,
+      enforceHttps: false 
     });
 
     const expectedWinners = [

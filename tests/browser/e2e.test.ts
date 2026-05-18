@@ -15,7 +15,7 @@ import { RPC } from "../../src/browser";
 // ---------------------------------------------------------------------------
 if (typeof window !== "undefined") {
     // Basic mock just so instantiation doesn't throw
-    window.fetch = jest.fn(async (_url: string, options?: any) => {
+    (window as any).fetch = jest.fn(async (_url: string, options?: any) => {
       let id = 1;
       try {
         if (options?.body) id = JSON.parse(options.body).id;
@@ -64,7 +64,7 @@ describe("Browser E2E: Ethereum Lifecycle", () => {
 
     beforeAll(async () => {
         const start = Date.now();
-        rpc = new RPC({ chainId: "0x0001", ttl: 3600 });
+        rpc = new RPC({ chainId: "0x0001", ttl: 3600, enforceHttps: false });
         hasValidated = await waitForValidation(rpc, 15_000);
         const timeTaken = Date.now() - start;
 
@@ -114,4 +114,8 @@ describe("Browser E2E: Ethereum Lifecycle", () => {
         }
         expect(success).toBe(true);
     }, E2E_TIMEOUT);
+});
+
+afterAll(async () => {
+    jest.useRealTimers();
 });

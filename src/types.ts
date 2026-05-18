@@ -1,3 +1,5 @@
+import { Logger } from "./core/logger";
+
 /**
  * Custom RPC URLs to append to the base RPC list.
  * URLs are validated at construction time — malformed URLs or wrong protocols
@@ -38,8 +40,8 @@ export interface RPCConfig {
   maxRetry?: number;
   /** Absolute path to custom RPC list JSON file (Node.js only). Replaces the built-in list entirely. */
   pathToRpcJson?: string;
-  /** Enable logging for debugging (default: false) */
-  log?: boolean;
+  /** Enable logging for debugging (default: false) or provide custom Logger */
+  log?: boolean | Logger;
   /** Load balancing strategy (default: "fastest") */
   loadBalancing?: "fastest" | "round-robin" | "random";
   /** Exponential backoff base delay in milliseconds (default: 2000) */
@@ -57,6 +59,18 @@ export interface RPCConfig {
    * @see CustomRpcs
    */
   customRpcs?: CustomRpcs;
+  /**
+   * Enforce HTTPS/WSS protocols for all endpoints.
+   * When true, any non-secure endpoints (http://, ws://) will be silently ignored.
+   * Default: true
+   */
+  enforceHttps?: boolean;
+  /**
+   * Inject a custom HTTP agent (e.g., undici Agent) to control routing behavior.
+   * This is used to enforce specific network policies like IPv4-only resolution.
+   * Must be provided at construction if strict routing is required.
+   */
+  agent?: any;
 }
 
 /**

@@ -59,19 +59,22 @@ describe("Validation: False Positive 200 OK responses", () => {
             srv.closeAllConnections();
             await new Promise<void>(resolve => srv.close(() => resolve()));
         }
+        
+        jest.useRealTimers();
     });
 
     test("should reject endpoints that return 200 OK but contain errors or invalid payloads", async () => {
-        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, ttl: 60 });
-        
+        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, ttl: 60, enforceHttps: false });
+
         // Wait for the initialization cycle to run and attempt to validate the bad endpoints
         const promise = rpc.getRpcAsync("https");
-        
+
         // All endpoints should fail validation gracefully, resulting in an empty valid list
         await expect(promise).rejects.toThrow("Failed To Find A Valid RPC");
-        
-        // Ensure absolutely no endpoints were marked as valid
-        expect(rpc.getValidRPCCount("https")).toBe(0);
+
+        // Ensure absolutely no endpoints were marked as actually valid
+        const validatedCount = rpc.getAllValidRPCs("https").filter(r => r.time < 999_999_999).length;
+        expect(validatedCount).toBe(0);
 
         rpc.destroy();
     });

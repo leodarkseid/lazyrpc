@@ -88,6 +88,8 @@ describe("URL Oracle: WebSocket Fleet Racing and Dynamic Failover", () => {
       }
       await new Promise<void>(resolve => ws.close(() => resolve()));
     }
+
+    jest.useRealTimers();
   });
 
   test("WS Manual Refresh: Oracle accurately tracks shifting latencies", async () => {
@@ -97,7 +99,8 @@ describe("URL Oracle: WebSocket Fleet Racing and Dynamic Failover", () => {
       chainId: "0x1",
       pathToRpcJson: jsonPath,
       validationTimeout: 1000,
-      ttl: 600
+      ttl: 600,
+      enforceHttps: false 
     });
 
     const expectedWinners = [
@@ -127,7 +130,8 @@ describe("URL Oracle: WebSocket Fleet Racing and Dynamic Failover", () => {
       chainId: "0x1",
       pathToRpcJson: jsonPath,
       validationTimeout: 1000,
-      ttl: 1
+      ttl: 1,
+      enforceHttps: false 
     });
 
     const expectedWinners = [

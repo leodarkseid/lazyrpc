@@ -1,6 +1,5 @@
-import { RPCBase } from "../../src/core";
+import { RPCBase } from "../../src/core/rpcBase";
 import { RPC } from "../../src/index";
-import fs from "fs";
 
 // ---------------------------------------------------------------------------
 // undici fetch mock — intercepts all internal HTTP validation calls
@@ -151,8 +150,10 @@ describe("RPC", () => {
   });
 
   describe("getRpc — load balancing strategies", () => {
-    test("throws before initialization completes (no validated URLs yet)", () => {
-      expect(() => rpc.getRpc("https")).toThrow("No valid https URLs found");
+    test("returns unvalidated URL before initialization completes", () => {
+      const url = rpc.getRpc("https");
+      expect(typeof url).toBe("string");
+      expect(url.startsWith("https://")).toBe(true);
     });
 
     test("fastest: returns a valid URL after initialization", async () => {
@@ -206,9 +207,9 @@ describe("RPC", () => {
   });
 
   describe("getValidRPCCount / getAllValidRPCs", () => {
-    test("getValidRPCCount returns 0 before initialization completes", () => {
-      expect(rpc.getValidRPCCount("https")).toBe(0);
-      expect(rpc.getValidRPCCount("ws")).toBe(0);
+    test("getValidRPCCount returns base URL count before initialization completes", () => {
+      expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
+      expect(rpc.getValidRPCCount("ws")).toBeGreaterThan(0);
     });
 
     test("getValidRPCCount returns endpoint count after initialization", async () => {
@@ -746,4 +747,8 @@ describe("RPC", () => {
       })).toThrow("customRpcs.ws must be a non-empty array");
     });
   });
+});
+
+afterAll(async () => {
+    jest.useRealTimers();
 });

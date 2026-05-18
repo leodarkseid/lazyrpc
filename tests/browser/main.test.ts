@@ -1,4 +1,4 @@
-import { RPCBase } from "../../src/core";
+
 
 // Mock the json module BEFORE importing RPC!
 jest.mock("../../src/rpcList.min.json", () => ({
@@ -7,6 +7,7 @@ jest.mock("../../src/rpcList.min.json", () => ({
 }), { virtual: true });
 
 import { RPC } from "../../src/browser";
+import { RPCBase } from "../../src/core/rpcBase";
 
 // ---------------------------------------------------------------------------
 // window.fetch mock
@@ -97,8 +98,10 @@ describe("Browser RPC", () => {
   });
 
   describe("getRpc — load balancing strategies", () => {
-    test("throws before initialization completes", () => {
-      expect(() => rpc.getRpc("https")).toThrow("No valid https URLs found");
+    test("returns unvalidated URL before initialization completes", () => {
+      const url = rpc.getRpc("https");
+      expect(typeof url).toBe("string");
+      expect(url.startsWith("https://")).toBe(true);
     });
 
     test("fastest: returns a valid URL after initialization", async () => {
@@ -114,8 +117,9 @@ describe("Browser RPC", () => {
   });
 
   describe("getValidRPCCount / getAllValidRPCs", () => {
-    test("getValidRPCCount returns 0 before initialization", () => {
-      expect(rpc.getValidRPCCount("https")).toBe(0);
+    test("getValidRPCCount returns base URL count before initialization completes", () => {
+      expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
+      expect(rpc.getValidRPCCount("ws")).toBeGreaterThan(0);
     });
 
     test("getValidRPCCount returns endpoint count after initialization", async () => {
@@ -295,4 +299,8 @@ describe("Browser RPC", () => {
       })).toThrow("customRpcs.http must be a non-empty array");
     });
   });
+});
+
+afterAll(async () => {
+    jest.useRealTimers();
 });

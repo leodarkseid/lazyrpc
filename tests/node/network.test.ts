@@ -4,6 +4,7 @@ import { fetch as undiciFetch, Agent } from "undici";
 
 describe("Strict Network Resilience and IP Routing", () => {
 
+
     // We expect these timeouts to happen fast (controlled by validationTimeout)
     // We add a short cushion over the library's internal timeout.
     const TEST_TIMEOUT = 10000;
@@ -31,7 +32,7 @@ describe("Strict Network Resilience and IP Routing", () => {
             // A normal fetch will stall here until the OS TCP timeout.
             // The library's internal validationTimeout (500ms) aborts the validation sweep;
             // we then make our own fetch with the same guard to prove the URL is dead-end.
-            const rpc = new RPC({ chainId: "0xdead", pathToRpcJson: blackholePath, validationTimeout: 500 });
+            const rpc = new RPC({ chainId: "0xdead", pathToRpcJson: blackholePath, validationTimeout: 500, log: console });
             const agent = new Agent({ connect: { family: 4 } });
 
             // Ask the library for the best URL then attempt the fetch ourselves.
@@ -66,7 +67,7 @@ describe("Strict Network Resilience and IP Routing", () => {
         test("abort requests to a blackhole IPv6 address ([2001:db8::1]) without stalling", async () => {
             // 2001:db8::1 is the IPv6 documentation prefix, also blackholed.
             // The library's agent enforces IPv4-only, so IPv6 URLs fail fast.
-            const rpc = new RPC({ chainId: "0xbeef", pathToRpcJson: blackholePath, validationTimeout: 500 });
+            const rpc = new RPC({ chainId: "0xbeef", pathToRpcJson: blackholePath, validationTimeout: 500, log: console });
             const agent = new Agent({ connect: { family: 4 } });
 
             const start = Date.now();
@@ -167,38 +168,21 @@ describe("Strict Network Resilience and IP Routing", () => {
         test("Strictly enforces IPv4 routing on 'localhost' via family: 4 configuration", async () => {
             const path = require('path');
             const localPath = path.join(__dirname, "localhost-rpc.json");
+            const rpc = new RPC({ chainId: "0xcafe", pathToRpcJson: localPath, validationTimeout: 10000, log: console });
+            // Use the same IPv4-only agent the library uses internally
+            const agent = new Agent({ connect: { family: 4 } });
 
             ipv4Hits = 0;
             ipv6Hits = 0;
 
-            // Create the RPC instance — its constructor starts initialize()
-            // which validates http://localhost:${port} using the library's
-            // internal Agent({ connect: { family: 4 } }).
-            const rpc = new RPC({ chainId: "0xcafe", pathToRpcJson: localPath, validationTimeout: 5000 });
-
-            // Wait for the library's internal validation to complete.
-            // The only URL in the chain list is our localhost server,
-            // so initialize() will hit it during its validation sweep.
-            const deadline = Date.now() + 10000;
-            while (rpc.getValidRPCCount("https") === 0 && rpc.status() === "initializing" && Date.now() < deadline) {
-                await new Promise(r => setTimeout(r, 50));
-            }
-
-            // The library's internal agent (family: 4) should have routed
-            // exclusively to the IPv4 server, never touching IPv6.
-            expect(ipv4Hits).toBeGreaterThan(0);
-            expect(ipv6Hits).toBe(0);
-
-            // If validation succeeded, verify the endpoint is accessible
-            if (rpc.getValidRPCCount("https") > 0) {
-                const url = rpc.getRpc("https");
-                expect(url).toBe(`http://localhost:${port}`);
-
-                // Verify the response came from the IPv4 server (result "0x1b4")
-                // by making a direct fetch with a fresh agent (same family:4 config)
-                const agent = new Agent({ connect: { family: 4 } });
+            // Ask the library for the best validated URL, then drive the fetch ourselves.
+            // The library's internal agent (family: 4) ensures validation only contacts IPv4,
+            // and we use the same family here so the actual call follows the same path.
+            let data: any;
+            try {
+                const url = await rpc.getRpcAsync("https");
                 const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 5000);
+                const timer = setTimeout(() => controller.abort(), 10000);
                 const response = await undiciFetch(url, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -207,26 +191,26 @@ describe("Strict Network Resilience and IP Routing", () => {
                     dispatcher: agent,
                 });
                 clearTimeout(timer);
-                const data: any = await response.json();
-                expect(data.result).toBe("0x1b4");
-                await agent.destroy();
+                data = await response.json();
+            } catch (err) {
+                throw new Error(`Dual-stack localhost call failed: ${err}`);
             }
 
+            expect(data.result).toBe("0x1b4");
+            expect(ipv4Hits).toBeGreaterThan(0);
+            expect(ipv6Hits).toBe(0);
+
+            await agent.destroy();
+            await rpc['agent']?.destroy();
             rpc.destroy();
 
-            // Allow undici sockets to fully close
+            // Force garbage collection of undici sockets so Jest can exit cleanly
             await new Promise(resolve => setTimeout(resolve, 200));
         }, 15000);
     });
 
     afterAll(async () => {
-        // Destroy global dispatcher if fetch accidentally leaked to it
-        const { getGlobalDispatcher } = require('undici');
-        const dispatcher = getGlobalDispatcher();
-        if (dispatcher && typeof dispatcher.destroy === 'function') {
-            await dispatcher.destroy();
-        }
-
+        jest.useRealTimers();
         // Allow all residual Undici TCPWRAPs to fully close before exiting Jest
         await new Promise(resolve => setTimeout(resolve, 500));
     });

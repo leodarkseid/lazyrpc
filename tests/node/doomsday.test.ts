@@ -1,8 +1,9 @@
-import { RPC } from "../../src/index";
+
 import * as http from "http";
 import { WebSocketServer, WebSocket } from "ws";
 import * as fs from "fs";
 import * as path from "path";
+import { RPC } from "../../src";
 
 describe("URL Oracle: The Doomsday Thundering Herd", () => {
     const TEST_TIMEOUT = 10000;
@@ -10,6 +11,14 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
 
     let httpServers: http.Server[] = [];
     let wsServers: WebSocketServer[] = [];
+    let activeRpcs: RPC[] = [];
+
+    afterEach(() => {
+        for (const rpc of activeRpcs) {
+            rpc.destroy();
+        }
+        activeRpcs = [];
+    });
 
     let urls: Record<string, string> = {};
     let wsUrls: Record<string, string> = {};
@@ -40,8 +49,8 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
 
         // Dead 3: Instantly closes the connection upon receiving a message
         wsUrls.WsClose = await new Promise<string>((resolve) => {
-            const wss:any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
-            wss.on('connection', (ws:any) => {
+            const wss: any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
+            wss.on('connection', (ws: any) => {
                 ws.on('message', () => ws.close(1011, "Internal Error"));
             });
             wsServers.push(wss);
@@ -49,8 +58,8 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
 
         // Dead 4: The WS Blackhole. Accepts message but NEVER responds.
         wsUrls.WsHang = await new Promise<string>((resolve) => {
-            const wss:any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
-            wss.on('connection', (ws:any) => {
+            const wss: any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
+            wss.on('connection', (ws: any) => {
                 ws.on('message', () => { /* Silence */ });
             });
             wsServers.push(wss);
@@ -75,11 +84,14 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
             for (const client of ws.clients ?? []) client.terminate();
             await new Promise<void>(resolve => ws.close(() => resolve()));
         }
+
+        jest.useRealTimers();
     });
 
     test("HTTP Doomsday: 100 concurrent calls survive total network failure cleanly", async () => {
         // Set a short validation timeout (500ms) to kill the hanging servers quickly
-        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, validationTimeout: 500, ttl: 60 });
+        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, validationTimeout: 500, ttl: 60, enforceHttps: false });
+        activeRpcs.push(rpc);
 
         // Fire 100 concurrent requests while the network is completely dead
         const promises = [];
@@ -106,11 +118,11 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
         })
 
 
-        rpc.destroy();
     });
 
     test("WebSocket Doomsday: 100 concurrent calls survive total WS failure cleanly", async () => {
-        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, validationTimeout: 500, ttl: 60 });
+        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, validationTimeout: 500, ttl: 60, enforceHttps: false });
+        activeRpcs.push(rpc);
 
         const promises = [];
         for (let i = 0; i < 100; i++) {
@@ -128,6 +140,5 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
             expect(url.reason).toStrictEqual(new Error("Failed To Find A Valid RPC"));
         })
 
-        rpc.destroy();
     });
 });

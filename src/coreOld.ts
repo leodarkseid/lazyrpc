@@ -31,7 +31,7 @@ export class RPCBase {
   /** Maximum number of retries before dropping an RPC */
   private maxRetry: number = 3;
   /** Flag to enable logging */
-  private log: boolean = false;
+  private log: any = false;
   /** Time before resetting failed URLs (in milliseconds) */
   private timeToResetFailedURL = 6 * 60 * 60 * 1000;
   /** Absolute path to alternative rpc list json used */
@@ -57,6 +57,8 @@ export class RPCBase {
   private isDestroyed: boolean = false;
   /** Centralized AbortController to cleanly abort pending requests upon destroy */
   private abortController: AbortController = new AbortController();
+  /** Enforce HTTPS/WSS URLs */
+  private enforceHttps: boolean = true;
 
   /** Injected Fetch function */
   private fetchFn: typeof fetch;
@@ -100,6 +102,7 @@ export class RPCBase {
     this.baseBackoffDelay = config.baseBackoffDelay ?? this.baseBackoffDelay;
     this.maxBackoffDelay = config.maxBackoffDelay ?? this.maxBackoffDelay;
     this.validationTimeout = config.validationTimeout ?? this.validationTimeout;
+    this.enforceHttps = config.enforceHttps ?? this.enforceHttps;
 
     this.fetchFn = deps.fetchFn;
     this.websocketClass = deps.websocketClass;
@@ -318,7 +321,11 @@ export class RPCBase {
     // Merge any user-provided custom RPCs (validates strictly, throws on bad URLs)
     this._mergeCustomRpcs();
 
-
+    // Enforce HTTPS
+    if (this.enforceHttps) {
+      this.baseHttpUrls = this.baseHttpUrls.filter(url => url.startsWith("https://"));
+      this.baseWsUrls = this.baseWsUrls.filter(url => url.startsWith("wss://"));
+    }
   }
 
   /**

@@ -12,3 +12,4 @@ demo.mjs
 .env.production.local
 coverage/
 .nyc_output/
+todo.txt
