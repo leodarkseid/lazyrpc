@@ -59,8 +59,7 @@ describe("Strict Network Resilience and IP Routing", () => {
                 expect(duration).toBeLessThan(1500);
             } finally {
                 await agent.destroy();
-                await rpc['agent']?.destroy();
-                rpc.destroy();
+                await rpc.destroy();
             }
         }, TEST_TIMEOUT);
 
@@ -89,8 +88,7 @@ describe("Strict Network Resilience and IP Routing", () => {
             expect(duration).toBeLessThan(1500);
 
             await agent.destroy();
-            await rpc['agent']?.destroy();
-            rpc.destroy();
+            await rpc.destroy();
             await new Promise(resolve => setTimeout(resolve, 100));
         }, TEST_TIMEOUT);
     });
@@ -154,7 +152,7 @@ describe("Strict Network Resilience and IP Routing", () => {
             fs.writeFileSync(localPath, JSON.stringify({
                 "xcafe": [`http://localhost:${port}`]
             }));
-        });
+        }, 15000);
 
         afterAll(async () => {
             await new Promise<void>(resolve => serverIPv4.close(() => resolve()));
@@ -168,41 +166,29 @@ describe("Strict Network Resilience and IP Routing", () => {
         test("Strictly enforces IPv4 routing on 'localhost' via family: 4 configuration", async () => {
             const path = require('path');
             const localPath = path.join(__dirname, "localhost-rpc.json");
-            const rpc = new RPC({ chainId: "0xcafe", pathToRpcJson: localPath, validationTimeout: 10000, log: console });
-            // Use the same IPv4-only agent the library uses internally
-            const agent = new Agent({ connect: { family: 4 } });
+            const rpc = new RPC({
+                chainId: "0xcafe",
+                pathToRpcJson: localPath,
+                validationTimeout: 10000,
+                log: console,
+            });
 
             ipv4Hits = 0;
             ipv6Hits = 0;
 
-            // Ask the library for the best validated URL, then drive the fetch ourselves.
-            // The library's internal agent (family: 4) ensures validation only contacts IPv4,
-            // and we use the same family here so the actual call follows the same path.
             let data: any;
             try {
-                const url = await rpc.getRpcAsync("https");
-                const controller = new AbortController();
-                const timer = setTimeout(() => controller.abort(), 10000);
-                const response = await undiciFetch(url, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ jsonrpc: "2.0", method: "eth_blockNumber", params: [], id: 1 }),
-                    signal: controller.signal,
-                    dispatcher: agent,
-                });
-                clearTimeout(timer);
-                data = await response.json();
+                const url = rpc.getRpc("https");
+                data = await rpc["httpCall"](url, 1);
             } catch (err) {
                 throw new Error(`Dual-stack localhost call failed: ${err}`);
+            } finally {
+                await rpc.destroy();
             }
 
             expect(data.result).toBe("0x1b4");
             expect(ipv4Hits).toBeGreaterThan(0);
             expect(ipv6Hits).toBe(0);
-
-            await agent.destroy();
-            await rpc['agent']?.destroy();
-            rpc.destroy();
 
             // Force garbage collection of undici sockets so Jest can exit cleanly
             await new Promise(resolve => setTimeout(resolve, 200));

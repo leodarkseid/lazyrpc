@@ -48,6 +48,7 @@ export class RPCBase {
   private isDestroyed: boolean = false;
   private abortController: AbortController = new AbortController();
   private initPromise: Promise<void> | null = null;
+  private destroyPromise: Promise<void> | null = null;
   private baseHttpUrls: string[] = [];
   private baseWsUrls: string[] = [];
   private id = 0;
@@ -176,20 +177,19 @@ export class RPCBase {
     await this.initialize();
   }
 
-  public destroy(): void {
+  public destroy(): Promise<void> {
+    if (this.destroyPromise) return this.destroyPromise;
+
     this.isDestroyed = true;
     this.abortController.abort();
     if (this.refreshTimer) {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = null;
     }
-    if (this.#config.agent && typeof this.#config.agent.destroy === "function") {
-      try { this.#config.agent.destroy(); } catch (e) { }
-    }
     this.validRPCs = [];
     this.validWSRPCs = [];
     this.health.reset();
-    this.abortController = new AbortController();
+    // this.abortController = new AbortController();
 
     for (const entry of this.getRpcAsyncQueue) {
       clearTimeout(entry.timer!);
@@ -197,6 +197,21 @@ export class RPCBase {
     }
     this.getRpcAsyncQueue.clear();
     this.#config.logger.info("RPC instance destroyed");
+
+    this.destroyPromise = (async () => {
+      try {
+        await this.initPromise;
+      } catch (e) { }
+
+      this.validRPCs = [];
+      this.validWSRPCs = [];
+
+      if (this.#config.agent && typeof this.#config.agent.destroy === "function") {
+        try { await this.#config.agent.destroy(); } catch (e) { }
+      }
+    })();
+
+    return this.destroyPromise;
   }
 
   public clearFailedURLs(): void {
@@ -235,10 +250,15 @@ export class RPCBase {
       const results: RPCCallResult[] = [];
 
       for (let i = 0; i < allUrls.length; i += BATCH_SIZE) {
+        if (this.isDestroyed) return;
+
         const batch = allUrls.slice(i, i + BATCH_SIZE);
         const batchResults = await Promise.allSettled(
           batch.map(({ url, type }) => this.timedCall(url, type)),
         );
+
+        if (this.isDestroyed) return;
+
         for (const result of batchResults) {
           if (result.status === "fulfilled") {
             this.drainQueueFor(result.value);
@@ -246,6 +266,8 @@ export class RPCBase {
           }else { this.#config.logger.warn("RPC validation failed:", result.reason);}
         }
       }
+
+      if (this.isDestroyed) return;
 
       const toEndpoints = (r: RPCCallResult[]) =>
         r.sort((a, b) => a.time - b.time).map((r) => ({ url: r.url, time: r.time }));

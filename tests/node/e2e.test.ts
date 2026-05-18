@@ -56,8 +56,8 @@ describe("E2E: Ethereum Lifecycle", () => {
         expect(timeTaken).toBeLessThan(20_000);
     }, E2E_TIMEOUT);
 
-    afterAll(() => {
-        rpc.destroy();
+    afterAll(async () => {
+        await rpc.destroy();
     });
 
     test("should have HTTP endpoints available (sync or validated)", () => {
@@ -101,7 +101,6 @@ describe("E2E: Ethereum Lifecycle", () => {
             console.warn("E2E fetch fallback failed completely:", error);
         } finally {
             await agent.destroy();
-            await rpc['agent']?.destroy();
         }
         expect(success).toBe(true);
     }, E2E_TIMEOUT);
@@ -150,8 +149,8 @@ describe("E2E: Drop & Failure Tracking", () => {
         await waitForValidation(rpc);
     }, E2E_TIMEOUT);
 
-    afterAll(() => {
-        rpc.destroy();
+    afterAll(async () => {
+        await rpc.destroy();
     });
 
     test("drop() should increment failure count by 1", () => {
@@ -193,7 +192,7 @@ describe("E2E: Load Balancing", () => {
         await waitForValidation(rpc);
     }, E2E_TIMEOUT);
 
-    afterAll(() => rpc.destroy());
+    afterAll(async () => await rpc.destroy());
 
     test("fastest should consistently return the same URL", () => {
         rpc["loadBalancing"] = "fastest";
@@ -247,7 +246,7 @@ describe("E2E: Multi-Chain", () => {
         ["Optimism", "0xa"],
         ["Base", "0x2105"],
         ["Avalanche C-Chain", "0xa86a"],
-    ])("should have %s (chainId %s) endpoints via init", (_name, chainId) => {
+    ])("should have %s (chainId %s) endpoints via init", async (_name, chainId) => {
         // Verifies the library can read the RPC list for this chain
         // and provide endpoints synchronously via init().
         // We do NOT wait for async validation here (it would be too slow
@@ -263,7 +262,7 @@ describe("E2E: Multi-Chain", () => {
         const wsCount = rpc.getValidRPCCount("ws");
         expect(wsCount).toBeGreaterThan(0);
 
-        rpc.destroy();
+        await rpc.destroy();
     });
 });
 
@@ -283,7 +282,7 @@ describe("E2E: Error Handling & Cleanup", () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, enforceHttps: false });
         expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
 
-        rpc.destroy();
+        await rpc.destroy();
 
         expect(rpc.getValidRPCCount("https")).toBe(0);
         expect(rpc.getValidRPCCount("ws")).toBe(0);
@@ -300,7 +299,7 @@ describe("E2E: pathToRpcJson", () => {
     const CUSTOM_LIST = path.resolve(__dirname, "../fixtures/custom-rpc-list.json");
     const INVALID_LIST = path.resolve(__dirname, "../fixtures/invalid-rpc-list.json");
 
-    test("should load endpoints from a custom JSON file", () => {
+    test("should load endpoints from a custom JSON file", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, pathToRpcJson: CUSTOM_LIST, enforceHttps: false });
 
         // The custom file has exactly 2 HTTP + 1 WS endpoint
@@ -313,10 +312,10 @@ describe("E2E: pathToRpcJson", () => {
         const wsUrl = rpc.getRpc("ws");
         expect(wsUrl).toBe("wss://ethereum-rpc.publicnode.com");
 
-        rpc.destroy();
+        await rpc.destroy();
     });
 
-    test("should fall back to bundled list when path does not exist", () => {
+    test("should fall back to bundled list when path does not exist", async () => {
         const rpc = new RPC({
             chainId: "0x0001",
             ttl: 3600,
@@ -328,7 +327,7 @@ describe("E2E: pathToRpcJson", () => {
         const count = rpc.getValidRPCCount("https");
         expect(count).toBeGreaterThan(2); // bundled list has 50+ for Ethereum
 
-        rpc.destroy();
+        await rpc.destroy();
     });
 
     // test("pathToRpcJson: should fall back to internal lists if unreadable", async () => {
@@ -361,7 +360,7 @@ describe("E2E: pathToRpcJson", () => {
         }).toThrow();
     });
 
-    test("custom path endpoints should work with all load balancing strategies", () => {
+    test("custom path endpoints should work with all load balancing strategies", async () => {
         const rpc = new RPC({
             chainId: "0x0001",
             ttl: 3600,
@@ -377,7 +376,7 @@ describe("E2E: pathToRpcJson", () => {
         expect(url1).not.toBe(url2); // different URLs
         expect(url3).toBe(url1);     // round-robin wraps
 
-        rpc.destroy();
+        await rpc.destroy();
     });
 
     test("custom path endpoints should validate via initialize()", async () => {
@@ -395,12 +394,13 @@ describe("E2E: pathToRpcJson", () => {
             expect(rpcs[0].url).toMatch(/publicnode|1rpc/);
         }
 
-        rpc.destroy();
+        await rpc.destroy();
     }, E2E_TIMEOUT);
 });
 
 afterAll(async () => {
     jest.useRealTimers();
-    // Allow all residual Undici TCPWRAPs to fully close before exiting Jest
-    await new Promise(resolve => setTimeout(resolve, 500));
+    // Allow residual aborted validation requests and Undici TCPWRAPs to close
+    // before the next in-band node test starts local loopback servers.
+    await new Promise(resolve => setTimeout(resolve, 3000));
 });
