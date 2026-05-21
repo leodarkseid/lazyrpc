@@ -34,7 +34,8 @@ describe("browser", () => {
 
   const fetchMock = jest.fn(async (_url: string, options: any) => ({
     ok: true,
-    json: async () => ({
+    headers: new Headers({ "content-type": "application/json" }),
+    text: async () => JSON.stringify({
       jsonrpc: "2.0",
       id: JSON.parse(options.body).id,
       result: "0x1",
@@ -58,8 +59,9 @@ describe("browser", () => {
   test("constructs RPCBase with browser fetch, WebSocket, and bundled chain list", () => {
     const rpc = new RPC({ chainId: "0x1" });
 
-    expect(rpc.getRpc("https")).toBe("https://rpc.example");
-    expect(rpc.getRpc("ws")).toBe("wss://ws.example");
+    expect(rpc.getAllCandidateRPCs("https")).toEqual(["https://rpc.example"]);
+    expect(rpc.getAllCandidateRPCs("ws")).toEqual(["wss://ws.example"]);
+    expect(() => rpc.getRpc("https")).toThrow("No validated https RPC URLs available yet");
 
     rpc.destroy();
   });

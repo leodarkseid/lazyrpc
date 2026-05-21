@@ -14,6 +14,7 @@ const config = (overrides: Partial<HealthConfig> = {}): HealthConfig => ({
   maxBackoffDelay: 1_000,
   timeToResetFailedURL: 5_000,
   logger: logger(),
+  errorPrefix: "LazyRpc",
   ...overrides,
 });
 
@@ -44,7 +45,7 @@ describe("core/health", () => {
       time: 1_000,
       nextRetry: 1_200,
     });
-    expect(testLogger.warn).toHaveBeenLastCalledWith("RPC https://rpc.example failed 2 times. Next retry in 200ms");
+    expect(testLogger.warn).toHaveBeenLastCalledWith("[LazyRpc: 'Health Manager'] RPC https://rpc.example failed 2 times. Next retry in 200ms");
   });
 
   test("caps exponential backoff at the configured maximum", () => {
@@ -92,7 +93,7 @@ describe("core/health", () => {
     health.reset();
 
     expect(health.entries.size).toBe(0);
-    expect(testLogger.info).toHaveBeenCalledWith("Cleared all failed URL records");
+    expect(testLogger.info).toHaveBeenCalledWith("[LazyRpc: 'Health Manager'] Cleared all failed URL records");
   });
 
   test("getStats separates backoff and over-max-retry URLs", () => {

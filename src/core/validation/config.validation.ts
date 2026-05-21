@@ -6,6 +6,7 @@
  */
 
 import { RPCConfig } from "../../types.js";
+import { LazyRpcError } from "../error.js";
 
 /**
  * Validates the user-provided RPCConfig.
@@ -14,32 +15,70 @@ import { RPCConfig } from "../../types.js";
  * @param config - The configuration to validate
  * @throws Error if any field is invalid
  */
-export function validateConfig(config: RPCConfig): void {
+export function validateConfig<THttp = string, TWs = string>(config: RPCConfig<THttp, TWs>): void {
+  const prefix = config.errorPrefix ?? "LazyRpc";
+  const scope = "Config Validation";
+
   if (!config.chainId) {
-    throw new Error("chainId is required");
+    throw new LazyRpcError("chainId is required", scope, prefix);
   }
 
-  if (!config.chainId.startsWith("0x")) {
-    throw new Error("chainId must be in hex format (e.g., '0x0001')");
+  if (typeof config.chainId === "string") {
+    const trimmed = config.chainId.trim();
+    if (!/^0x[0-9a-fA-F]+$/i.test(trimmed) && !/^\d+$/.test(trimmed) && !/^[0-9a-fA-F]+$/i.test(trimmed)) {
+      throw new LazyRpcError("chainId must be in hex format", scope, prefix);
+    }
+  } else if (typeof config.chainId === "number") {
+    if (!Number.isSafeInteger(config.chainId) || config.chainId < 0) {
+      throw new LazyRpcError("chainId number must be a positive integer", scope, prefix);
+    }
+  } else {
+    throw new LazyRpcError("chainId must be in hex format", scope, prefix);
   }
 
   if (config.ttl !== undefined && (config.ttl <= 0 || config.ttl > 3600)) {
-    throw new Error("ttl must be between 1 and 3600 seconds");
+    throw new LazyRpcError("ttl must be between 1 and 3600 seconds", scope, prefix);
   }
 
   if (
     config.maxRetry !== undefined &&
     (config.maxRetry < 0 || config.maxRetry > 10)
   ) {
-    throw new Error("maxRetry must be between 0 and 10");
+    throw new LazyRpcError("maxRetry must be between 0 and 10", scope, prefix);
   }
 
   if (
     config.loadBalancing &&
     !["fastest", "round-robin", "random"].includes(config.loadBalancing)
   ) {
-    throw new Error(
+    throw new LazyRpcError(
       "loadBalancing must be 'fastest', 'round-robin', or 'random'",
+      scope, prefix
     );
+  }
+
+  const positiveIntegerFields: [keyof RPCConfig, string][] = [
+    ["maxPayloadBytes", "maxPayloadBytes"],
+    ["maxPayloadDepth", "maxPayloadDepth"],
+    ["maxPayloadKeys", "maxPayloadKeys"],
+    ["maxPayloadArrayLength", "maxPayloadArrayLength"],
+    ["maxPayloadStringBytes", "maxPayloadStringBytes"],
+  ];
+
+  for (const [field, label] of positiveIntegerFields) {
+    const value = config[field];
+    if (
+      value !== undefined &&
+      (typeof value !== "number" || !Number.isInteger(value) || value <= 0)
+    ) {
+      throw new LazyRpcError(`${label} must be a positive integer`, scope, prefix);
+    }
+  }
+
+  if (
+    config.requireJsonContentType !== undefined &&
+    typeof config.requireJsonContentType !== "boolean"
+  ) {
+    throw new LazyRpcError("requireJsonContentType must be a boolean", scope, prefix);
   }
 }

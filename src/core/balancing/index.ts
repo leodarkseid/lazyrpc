@@ -20,13 +20,13 @@ export class FastestBalancer implements LoadBalancer {
 }
 
 export class RoundRobinBalancer implements LoadBalancer {
-  private index = 0;
+  #index = 0;
 
   select(endpoints: RPCEndpoint[], skipFn: (url: string) => boolean): RPCEndpoint | undefined {
     for (let i = 0; i < endpoints.length; i++) {
-      const idx = (this.index + i) % endpoints.length;
-      if (!skipFn(endpoints[idx].url)) {
-        this.index = (idx + 1) % endpoints.length;
+      const idx = (this.#index + i) % endpoints.length;
+      if (endpoints[idx]?.url && !skipFn(endpoints[idx].url)) {
+        this.#index = (idx + 1) % endpoints.length;
         return endpoints[idx];
       }
     }

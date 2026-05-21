@@ -44,7 +44,16 @@ if (typeof global.MessagePort === 'undefined') {
 }
 
 // 2. NOW it is safe to require undici, because it will see browser-compatible globals.
-const { FormData } = require('undici');
+const { FormData, Headers, Request, Response } = require('undici');
 if (typeof global.FormData === 'undefined') {
   global.FormData = FormData;
+}
+if (typeof global.Headers === 'undefined') {
+  global.Headers = Headers;
+}
+if (typeof global.Request === 'undefined') {
+  global.Request = Request;
+}
+if (typeof global.Response === 'undefined') {
+  global.Response = Response;
 }

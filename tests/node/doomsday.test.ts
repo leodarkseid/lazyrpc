@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import * as fs from "fs";
 import * as path from "path";
 import { RPC } from "../../src";
+import { LazyRpcError } from "../../src/core/error";
 
 describe("URL Oracle: The Doomsday Thundering Herd", () => {
     const TEST_TIMEOUT = 10000;
@@ -105,16 +106,10 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
         // Assertion 1: All 100 requests resolved successfully.
         expect(results).toHaveLength(100);
 
-        // Assertion 2: The Graceful Fallback. 
-        // Because ALL nodes failed, validRPCs is empty. The Oracle should safely return the FIRST URL 
-        // in the JSON file so the user's app doesn't completely halt.
-
-
-
         results.forEach((url: any) => {
             expect(url.status).toBe("rejected");
             expect(url.reason).toBeInstanceOf(Error);
-            expect(url.reason).toStrictEqual(new Error("Failed To Find A Valid RPC"));
+            expect(url.reason).toStrictEqual(new LazyRpcError("Failed to find a validated https RPC URL during this validation cycle", "RPC Base", "LazyRpc"));
         })
 
 
@@ -133,11 +128,10 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
 
         expect(results).toHaveLength(100);
 
-        // Graceful fallback for WebSockets
         results.forEach((url: any) => {
             expect(url.status).toBe("rejected");
             expect(url.reason).toBeInstanceOf(Error);
-            expect(url.reason).toStrictEqual(new Error("Failed To Find A Valid RPC"));
+            expect(url.reason).toStrictEqual(new LazyRpcError("Failed to find a validated ws RPC URL during this validation cycle", "RPC Base", "LazyRpc"));
         })
 
     });

@@ -28,7 +28,8 @@ describe("index", () => {
     jest.useFakeTimers();
     mockFetch.mockResolvedValue({
       ok: true,
-      json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x1" }),
+      headers: new Headers({ "content-type": "application/json" }),
+      text: async () => JSON.stringify({ jsonrpc: "2.0", id: 1, result: "0x1" }),
     });
     mockExistsSync.mockReturnValue(false);
     mockReadFileSync.mockReturnValue(JSON.stringify({
@@ -48,7 +49,8 @@ describe("index", () => {
     const rpc = new RPC({ chainId: "0x1" });
 
     expect(mockReadFileSync.mock.calls[0][0]).toContain("rpcList.min.json");
-    expect(rpc.getRpc("https")).toBe("https://rpc.example");
+    expect(rpc.getAllCandidateRPCs("https")).toEqual(["https://rpc.example"]);
+    expect(() => rpc.getRpc("https")).toThrow("No validated https RPC URLs available yet");
 
     rpc.destroy();
   });
@@ -62,7 +64,7 @@ describe("index", () => {
     const rpc = new RPC({ chainId: "0x1", pathToRpcJson: "/tmp/custom-rpcs.json" });
 
     expect(mockReadFileSync).toHaveBeenCalledWith("/tmp/custom-rpcs.json", "utf-8");
-    expect(rpc.getRpc("https")).toBe("https://custom.example");
+    expect(rpc.getAllCandidateRPCs("https")).toEqual(["https://custom.example"]);
 
     rpc.destroy();
   });

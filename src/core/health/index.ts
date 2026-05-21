@@ -16,14 +16,15 @@ export interface HealthConfig {
   readonly maxBackoffDelay: number;
   readonly timeToResetFailedURL: number;
   readonly logger: Logger;
+  readonly errorPrefix: string;
 }
 
 export class EndpointHealthManager {
-  private readonly failedURL = new Map<string, FailedURLInfo>();
-  private readonly config: HealthConfig;
+  readonly #failedURL = new Map<string, FailedURLInfo>();
+  readonly #config: HealthConfig;
 
   constructor(config: HealthConfig) {
-    this.config = config;
+    this.#config = config;
   }
 
   /**
@@ -31,45 +32,52 @@ export class EndpointHealthManager {
    * @param url - The failed URL
    * @param count - Number of failures to add (default: 1)
    */
-  recordFailure(url: string, count: number = 1): void {
-    const prev = this.failedURL.get(url) ?? {
+  recordFailure(url: string, count = 1): void {
+    const prev = this.#failedURL.get(url) ?? {
       count: 0, time: Date.now(), nextRetry: Date.now(),
     };
 
     const newCount = prev.count + count;
     const backoffDelay = Math.min(
-      this.config.baseBackoffDelay * Math.pow(2, newCount - 1),
-      this.config.maxBackoffDelay,
+      this.#config.baseBackoffDelay * Math.pow(2, newCount - 1),
+      this.#config.maxBackoffDelay,
     );
 
-    this.failedURL.set(url, {
+    this.#failedURL.set(url, {
       count: newCount, time: Date.now(), nextRetry: Date.now() + backoffDelay,
     });
 
-    this.config.logger.warn(`RPC ${url} failed ${newCount} times. Next retry in ${backoffDelay}ms`);
+    this.#config.logger.warn(`[${this.#config.errorPrefix}: 'Health Manager'] RPC ${url} failed ${newCount} times. Next retry in ${backoffDelay}ms`);
   }
 
   /**
    * Checks if a URL should be skipped due to backoff or retry limits.
    */
   shouldSkip(url: string): boolean {
-    const info = this.failedURL.get(url);
+    const info = this.#failedURL.get(url);
     if (!info) return false;
 
-    if (Date.now() - info.time > this.config.timeToResetFailedURL) {
-      this.failedURL.delete(url);
+    if (Date.now() - info.time > this.#config.timeToResetFailedURL) {
+      this.#failedURL.delete(url);
+      this.#config.logger.info(`[${this.#config.errorPrefix}: 'Health Manager'] Failure record expired for RPC ${url}; allowing validation again`);
       return false;
     }
 
-    if (info.count >= this.config.maxRetry) return true;
-    if (info.nextRetry && Date.now() < info.nextRetry) return true;
+    if (info.count >= this.#config.maxRetry) {
+      this.#config.logger.debug(`[${this.#config.errorPrefix}: 'Health Manager'] Skipping RPC ${url}; failure count ${info.count} reached maxRetry ${this.#config.maxRetry}`);
+      return true;
+    }
+    if (info.nextRetry && Date.now() < info.nextRetry) {
+      this.#config.logger.debug(`[${this.#config.errorPrefix}: 'Health Manager'] Skipping RPC ${url}; retry window opens in ${info.nextRetry - Date.now()}ms`);
+      return true;
+    }
     return false;
   }
 
   /** Clears all failure records. */
   reset(): void {
-    this.failedURL.clear();
-    this.config.logger.info("Cleared all failed URL records");
+    this.#failedURL.clear();
+    this.#config.logger.info(`[${this.#config.errorPrefix}: 'Health Manager'] Cleared all failed URL records`);
   }
 
   /** Returns failure statistics. */
@@ -77,19 +85,22 @@ export class EndpointHealthManager {
     let inBackoff = 0;
     let overMaxRetries = 0;
 
-    this.failedURL.forEach((info) => {
-      if (info.count >= this.config.maxRetry) {
+    this.#failedURL.forEach((info) => {
+      if (info.count >= this.#config.maxRetry) {
         overMaxRetries++;
       } else if (info.nextRetry && Date.now() < info.nextRetry) {
         inBackoff++;
       }
     });
 
-    return { totalFailed: this.failedURL.size, inBackoff, overMaxRetries };
+    return { totalFailed: this.#failedURL.size, inBackoff, overMaxRetries };
   }
 
-  /** Exposes the raw failure Map (backward compat for tests accessing rpc["failedURL"]). */
   get entries(): Map<string, FailedURLInfo> {
-    return this.failedURL;
+    const clone = new Map<string, FailedURLInfo>();
+    for (const [key, val] of this.#failedURL.entries()) {
+      clone.set(key, { ...val });
+    }
+    return clone;
   }
 }

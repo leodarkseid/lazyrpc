@@ -13,7 +13,7 @@ describe("core/config", () => {
       const internal = buildInternalConfig({ chainId: "0x1" }, deps);
 
       expect(internal).toMatchObject({
-        chainId: "0x1",
+        chainId: "x0001",
         ttl: 10,
         maxRetry: 3,
         loadBalancing: "fastest",
@@ -25,6 +25,12 @@ describe("core/config", () => {
         fetchFn: deps.fetchFn,
         websocketClass: deps.websocketClass,
         agent: deps.agent,
+        maxPayloadBytes: 2048,
+        maxPayloadDepth: 3,
+        maxPayloadKeys: 10,
+        maxPayloadArrayLength: 10,
+        maxPayloadStringBytes: 100,
+        requireJsonContentType: true,
       });
       expect(Object.isFrozen(internal)).toBe(true);
     });
@@ -47,10 +53,16 @@ describe("core/config", () => {
         maxBackoffDelay: 500,
         validationTimeout: 750,
         enforceHttps: false,
+        maxPayloadBytes: 2048,
+        maxPayloadDepth: 8,
+        maxPayloadKeys: 50,
+        maxPayloadArrayLength: 25,
+        maxPayloadStringBytes: 512,
+        requireJsonContentType: false,
       }, deps);
 
       expect(internal).toMatchObject({
-        chainId: "0x89",
+        chainId: "x89",
         ttl: 60,
         maxRetry: 7,
         logger: customLogger,
@@ -59,6 +71,12 @@ describe("core/config", () => {
         maxBackoffDelay: 500,
         validationTimeout: 750,
         enforceHttps: false,
+        maxPayloadBytes: 2048,
+        maxPayloadDepth: 8,
+        maxPayloadKeys: 50,
+        maxPayloadArrayLength: 25,
+        maxPayloadStringBytes: 512,
+        requireJsonContentType: false,
       });
     });
 
@@ -68,8 +86,86 @@ describe("core/config", () => {
       expect(buildInternalConfig({ chainId: "0x1" }, deps).logger).toBe(silentLogger);
     });
 
-    test("delegates config validation before building", () => {
-      expect(() => buildInternalConfig({ chainId: "1" }, deps)).toThrow("chainId must be in hex format");
+    test("incorporates custom agent from RPCConfig properly, overriding dependencies agent", () => {
+      const customAgent = { name: "custom-undici-agent" };
+      const internal = buildInternalConfig({ chainId: "0x1", agent: customAgent }, deps);
+      expect(internal.agent).toBe(customAgent);
+    });
+
+    test("falls back to dependencies agent when RPCConfig omits agent", () => {
+      const internal = buildInternalConfig({ chainId: "0x1" }, deps);
+      expect(internal.agent).toBe(deps.agent);
+    });
+
+    test("handles full spectrum of valid configurations", () => {
+      const fullConfig = {
+        chainId: "0xaa36a7",
+        ttl: 3600,
+        maxRetry: 10,
+        log: true,
+        loadBalancing: "round-robin" as const,
+        baseBackoffDelay: 100,
+        maxBackoffDelay: 60000,
+        validationTimeout: 10000,
+        timeToResetFailedURL: 300000,
+        customRpcs: {
+          http: ["https://full-custom-http.com"],
+          ws: ["wss://full-custom-ws.com"],
+        },
+        enforceHttps: true,
+        agent: { custom: true },
+        maxPayloadBytes: 500,
+        maxPayloadDepth: 5,
+        maxPayloadKeys: 10,
+        maxPayloadArrayLength: 5,
+        maxPayloadStringBytes: 100,
+        requireJsonContentType: false,
+      };
+
+      const internal = buildInternalConfig(fullConfig, deps);
+
+      expect(internal).toMatchObject({
+        chainId: "xaa36a7",
+        ttl: 3600,
+        maxRetry: 10,
+        logger: defaultLogger,
+        loadBalancing: "round-robin",
+        baseBackoffDelay: 100,
+        maxBackoffDelay: 60000,
+        validationTimeout: 10000,
+        timeToResetFailedURL: 300000,
+        enforceHttps: true,
+        agent: fullConfig.agent,
+        maxPayloadBytes: 500,
+        maxPayloadDepth: 5,
+        maxPayloadKeys: 10,
+        maxPayloadArrayLength: 5,
+        maxPayloadStringBytes: 100,
+        requireJsonContentType: false,
+      });
+    });
+
+    test("parses chainId correctly from various input formats", () => {
+      // Hex strings
+      expect(buildInternalConfig({ chainId: "0x1" }, deps).chainId).toBe("x0001");
+      expect(buildInternalConfig({ chainId: "0X1" }, deps).chainId).toBe("x0001");
+      expect(buildInternalConfig({ chainId: "0xaa36a7" }, deps).chainId).toBe("xaa36a7");
+      
+      // Numeric strings
+      expect(buildInternalConfig({ chainId: "137" }, deps).chainId).toBe("x89");
+      expect(buildInternalConfig({ chainId: "1" }, deps).chainId).toBe("x0001");
+
+      // Hex strings without 0x
+      expect(buildInternalConfig({ chainId: "aa36a7" }, deps).chainId).toBe("xaa36a7");
+
+      // Numbers
+      expect(buildInternalConfig({ chainId: 137 }, deps).chainId).toBe("x89");
+      expect(buildInternalConfig({ chainId: 1 }, deps).chainId).toBe("x0001");
+
+      // Invalid inputs
+      expect(() => buildInternalConfig({ chainId: -1 }, deps)).toThrow("chainId number must be a positive integer");
+      expect(() => buildInternalConfig({ chainId: "invalid" }, deps)).toThrow("chainId must be in hex format");
+      expect(() => buildInternalConfig({ chainId: null as any }, deps)).toThrow("chainId is required");
     });
   });
 
@@ -98,15 +194,29 @@ describe("core/config", () => {
 
     test("deduplicates and filters insecure remote URLs by default", () => {
       expect(resolveBaseUrls(chainList, "0x1")).toEqual({
-        http: ["https://rpc-1.example", "http://localhost:8545"],
-        ws: ["wss://ws-1.example", "ws://localhost:8546"],
+        http: [
+          { url: "https://rpc-1.example", originalFormat: "string" },
+          { url: "http://localhost:8545", originalFormat: "string" }
+        ],
+        ws: [
+          { url: "wss://ws-1.example", originalFormat: "string" },
+          { url: "ws://localhost:8546", originalFormat: "string" }
+        ],
       });
     });
 
     test("keeps insecure remote URLs when enforceHttps is disabled", () => {
       expect(resolveBaseUrls(chainList, "0x1", undefined, false)).toEqual({
-        http: ["https://rpc-1.example", "http://rpc-2.example", "http://localhost:8545"],
-        ws: ["wss://ws-1.example", "ws://ws-2.example", "ws://localhost:8546"],
+        http: [
+          { url: "https://rpc-1.example", originalFormat: "string" },
+          { url: "http://rpc-2.example", originalFormat: "string" },
+          { url: "http://localhost:8545", originalFormat: "string" }
+        ],
+        ws: [
+          { url: "wss://ws-1.example", originalFormat: "string" },
+          { url: "ws://ws-2.example", originalFormat: "string" },
+          { url: "ws://localhost:8546", originalFormat: "string" }
+        ],
       });
     });
 
@@ -115,8 +225,42 @@ describe("core/config", () => {
         http: ["https://custom.example", "http://custom.example"],
         ws: ["wss://custom.example", "ws://custom.example"],
       })).toEqual({
-        http: ["https://rpc-1.example", "http://localhost:8545", "https://custom.example"],
-        ws: ["wss://ws-1.example", "ws://localhost:8546", "wss://custom.example"],
+        http: [
+          { url: "https://rpc-1.example", originalFormat: "string" },
+          { url: "http://localhost:8545", originalFormat: "string" },
+          { url: "https://custom.example", originalFormat: "string" }
+        ],
+        ws: [
+          { url: "wss://ws-1.example", originalFormat: "string" },
+          { url: "ws://localhost:8546", originalFormat: "string" },
+          { url: "wss://custom.example", originalFormat: "string" }
+        ],
+      });
+    });
+
+    test("merges custom endpoint objects before secure filtering", () => {
+      expect(resolveBaseUrls(chainList, "0x1", {
+        http: [
+          "https://custom.example", 
+          { url: "https://custom2.example", query: { "key": "val" } }
+        ] as any,
+        ws: [
+          "wss://custom.example", 
+          { url: "wss://custom2.example", headers: { "X-Auth": "token" } }
+        ] as any,
+      })).toEqual({
+        http: [
+          { url: "https://rpc-1.example", originalFormat: "string" },
+          { url: "http://localhost:8545", originalFormat: "string" },
+          { url: "https://custom.example", originalFormat: "string" },
+          { url: "https://custom2.example", originalFormat: "object", query: { "key": "val" } }
+        ],
+        ws: [
+          { url: "wss://ws-1.example", originalFormat: "string" },
+          { url: "ws://localhost:8546", originalFormat: "string" },
+          { url: "wss://custom.example", originalFormat: "string" },
+          { url: "wss://custom2.example", originalFormat: "object", headers: { "X-Auth": "token" } }
+        ],
       });
     });
   });

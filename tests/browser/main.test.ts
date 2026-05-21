@@ -9,6 +9,8 @@ jest.mock("../../src/rpcList.min.json", () => ({
 import { RPC } from "../../src/browser";
 import { RPCBase } from "../../src/core/rpcBase";
 
+const jsonHeaders = { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json" : null };
+
 // ---------------------------------------------------------------------------
 // window.fetch mock
 // ---------------------------------------------------------------------------
@@ -17,7 +19,12 @@ const mockFetch = jest.fn(async (_url: string, options?: any) => {
   try {
     if (options?.body) id = JSON.parse(options.body).id;
   } catch { }
-  return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id, result: "0x10" }) };
+  return {
+    ok: true,
+    status: 200,
+    headers: jsonHeaders,
+    text: async () => JSON.stringify({ jsonrpc: "2.0", id, result: "0x10" }),
+  };
 });
 
 global.fetch = mockFetch as any;
@@ -98,10 +105,10 @@ describe("Browser RPC", () => {
   });
 
   describe("getRpc — load balancing strategies", () => {
-    test("returns unvalidated URL before initialization completes", () => {
-      const url = rpc.getRpc("https");
-      expect(typeof url).toBe("string");
-      expect(url.startsWith("https://")).toBe(true);
+    test("throws before initialization validates a URL and exposes candidates separately", () => {
+      expect(() => rpc.getRpc("https")).toThrow("No validated https RPC URLs available yet");
+      expect(rpc.getAllCandidateRPCs("https")).toEqual(["https://rpc1.com", "https://rpc2.com"]);
+      expect(rpc.getAllRPCs("ws")).toEqual(["wss://ws1.com", "wss://ws2.com"]);
     });
 
     test("fastest: returns a valid URL after initialization", async () => {
@@ -117,9 +124,10 @@ describe("Browser RPC", () => {
   });
 
   describe("getValidRPCCount / getAllValidRPCs", () => {
-    test("getValidRPCCount returns base URL count before initialization completes", () => {
-      expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
-      expect(rpc.getValidRPCCount("ws")).toBeGreaterThan(0);
+    test("getValidRPCCount returns zero before initialization completes", () => {
+      expect(rpc.getValidRPCCount("https")).toBe(0);
+      expect(rpc.getValidRPCCount("ws")).toBe(0);
+      expect(rpc.getAllCandidateRPCs("https").length).toBeGreaterThan(0);
     });
 
     test("getValidRPCCount returns endpoint count after initialization", async () => {
@@ -161,34 +169,7 @@ describe("Browser RPC", () => {
     });
   });
 
-  describe("httpCall — internal RPC validation via fetch", () => {
-    test("sends a POST eth_blockNumber request to the given URL", async () => {
-      await drainInit();
-      const url = rpc.getRpc("https");
-      await rpc["httpCall"](url, 1);
-      expect(mockFetch).toHaveBeenCalledWith(url, expect.any(Object));
-    });
 
-    test("records the URL in failedURL map when the network request throws", async () => {
-      mockFetch.mockImplementation(async (url: string) => {
-        if (url === "https://failing-rpc.com") {
-          throw new Error("Network error");
-        }
-        return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id: 1, result: "0x1" }) };
-      });
-
-      const r = new RPC({ chainId: "0x0001" });
-      await expect(r["httpCall"]("https://failing-rpc.com", 1)).rejects.toThrow("Network error");
-      expect(r["failedURL"].has("https://failing-rpc.com")).toBe(true);
-      r.destroy();
-      // Restore healthy mock for subsequent tests
-      mockFetch.mockImplementation(async (_url: string, options?: any) => {
-        let id = 1;
-        try { if (options?.body) id = JSON.parse(options.body).id; } catch { }
-        return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id, result: "0x10" }) };
-      });
-    });
-  });
 
   describe("getRpcAsync", () => {
     test("resolves with a valid URL once initialization validates one", async () => {
@@ -244,11 +225,9 @@ describe("Browser RPC", () => {
     test("clears all endpoint lists, failure records, queue, and cancels the refresh timer", () => {
       rpc.drop("https://fail.com");
       rpc.destroy();
-      expect(rpc["refreshTimer"]).toBeNull();
-      expect(rpc["validRPCs"]).toEqual([]);
-      expect(rpc["validWSRPCs"]).toEqual([]);
-      expect(rpc["failedURL"].size).toBe(0);
-      expect(rpc["getRpcAsyncQueue"].size).toBe(0);
+      expect(rpc.getAllCandidateRPCs("https")).toEqual([]);
+      expect(rpc.getAllCandidateRPCs("ws")).toEqual([]);
+      expect(rpc.getFailureStats().totalFailed).toBe(0);
     });
   });
 
@@ -296,7 +275,7 @@ describe("Browser RPC", () => {
       expect(() => new RPC({
         chainId: "0x0001",
         customRpcs: { http: [] },
-      })).toThrow("customRpcs.http must be a non-empty array");
+      })).toThrow("customRpcs.http array cannot be empty");
     });
   });
 });

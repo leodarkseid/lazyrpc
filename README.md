@@ -5,9 +5,9 @@
 
 ## Overview
 
-LAZY RPC is a robust, production-ready, and environmentally-aware library designed to manage and validate Remote Procedure Call (RPC) URLs for blockchain interactions. Built from the ground up to guarantee extreme fast resolution, it provides massive performance gains, very low memory footprint, and maximum compatibility in both **Node.js and Browser environments**.
+LAZY RPC is a robust, lightweight, and production-ready library designed to securely manage and validate Remote Procedure Call (RPC) URLs for blockchain interactions. Built from the ground up to guarantee extremely fast resolution, it provides massive performance gains, a very low memory footprint, and maximum compatibility in both **Node.js and Browser environments**.
 
-It supports both HTTP and WebSocket (WS) calls, intelligent failure tracking, exponential backoff retry logic, multiple load balancing strategies, and automatic endpoint validation.
+Crucially, Lazy RPC is highly secure but completely non-obstructive. Its background processing is intelligent enough to sample endpoints, apply smart exponential backoff, and load balance your API usage—meaning it will **never** clog your network queue or cause visible spikes in your CPU/memory usage. It seamlessly guarantees strict endpoint correctness while remaining entirely invisible to your hot path.
 
 ## Why Lazy RPC? Performance & Architecture
 
@@ -78,7 +78,7 @@ try {
   rpc.drop(url); // Drops the node from the active pool and applies an exponential penalty
 }
 
-// Clean up when done (Releases TCP sockets / Memory handles)
+// Clean up when done (Releases TCP sockets / Memory handles) N.B. The library will eventually do this itself, this is a more deterministic way to ensure it get done
 rpc.destroy(); 
 ```
 
@@ -128,7 +128,7 @@ function getEndpoint(): string | null {
 
 ```typescript
 // getRpcAsync resolves the instant the first URL is validated
-// — you don't wait for all 10,000 URLs to be checked
+// — you don't wait for all 10,000 URLs to be checked, on detection of any valid url, all queued async request are resolved immediately with that url
 const url = await rpc.getRpcAsync("https");
 ```
 
@@ -236,7 +236,7 @@ const rpc = new RPC({
 
 ### Adding Custom RPCs Without Replacing the Built-in List
 
-Use `customRpcs` to **append** your own endpoints (private nodes, Infura, Alchemy, etc.) into the pool alongside the built-in list — without replacing anything.
+Use `customRpcs` to **append** your own endpoints (private nodes, Infura, Alchemy, etc.) into the pool alongside the built-in list — without replacing anything. `customRpcs` flexibly accepts both simple URL strings and fully featured endpoint objects (useful for injecting authentication headers or dynamic query parameters).
 
 ```typescript
 import { RPC } from "lazy-rpc";
@@ -246,10 +246,16 @@ const rpc = new RPC({
   customRpcs: {
     http: [
       "https://eth-mainnet.g.alchemy.com/v2/YOUR_KEY",
-      "https://mainnet.infura.io/v3/YOUR_KEY"
+      { 
+        url: "https://my-secure-node.internal", 
+        headers: { "Authorization": "Bearer MY_TOKEN" }
+      }
     ],
     ws: [
-      "wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY"
+      "wss://eth-mainnet.g.alchemy.com/v2/YOUR_KEY",
+      { 
+        url: "wss://my-secure-node.internal", 
+      }
     ]
   }
 });
@@ -259,8 +265,27 @@ The `customRpcs` object accepts two optional keys:
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `http` | `string[]` | HTTP(S) RPC endpoint URLs to add to the pool |
-| `ws` | `string[]` | WebSocket (WS/WSS) RPC endpoint URLs to add to the pool |
+| `http` | `(string \| HttpRpcEndpointOptions)[]` | HTTP(S) RPC endpoints to add to the pool |
+| `ws` | `(string \| HttpRpcEndpointOptions)[]` | WebSocket (WS/WSS) RPC endpoints to add to the pool |
+
+> **Note:** The exact types you provide in `customRpcs` (whether strings or objects) are preserved. If you pass an object with `headers` or `query`, the `getRpc()` and `getRpcAsync()` methods will return that exact object back to you so you can easily apply the identical configurations to your downstream requests!
+
+#### Endpoint Objects (`HttpRpcEndpointOptions`)
+
+If you choose to pass objects instead of raw strings, the objects must satisfy the following interface:
+
+```typescript
+interface HttpRpcEndpointOptions {
+  url: string; // Required: The target HTTP or WS url
+  
+  // Optional: Static or dynamically resolved headers
+  headers?: Record<string, string> | (() => Promise<Record<string, string>>);
+  
+  // Optional: Static or dynamically resolved query parameters
+  query?: Record<string, string> | (() => Promise<Record<string, string>>);
+}
+```
+This is extremely powerful because it allows you to asynchronously resolve authentication tokens or rotating API keys exactly at the moment of connection (even during background pings) without blocking or caching stale credentials!
 
 **Validation rules — the library throws immediately at construction if:**
 - An **empty array** is passed (`http: []` or `ws: []`). Omit the key entirely if you have no endpoints of that type.
@@ -292,19 +317,38 @@ const rpc = new RPC({
 ### Constructor Options
 
 ```typescript
-interface RPCConfig {
-  chainId: string;                    // Required: Blockchain chain ID (hex format, e.g. "0x0001")
+interface RPCConfig<THttp = string, TWs = string> {
+  chainId: string | number;           // Required: Blockchain chain ID (e.g. "0x0001", "137", or 137)
   ttl?: number;                      // Optional: Refresh interval in seconds (1-3600, default: 10)
   maxRetry?: number;                 // Optional: Max retries before dropping (0-10, default: 3)
   pathToRpcJson?: string;           // Optional: Custom RPC list file path (Node.js only, replaces built-in list)
-  customRpcs?: CustomRpcs;          // Optional: Additional RPCs to merge into the base list
-  log?: boolean;                    // Optional: Enable logging (default: false)
+  customRpcs?: CustomRpcs<THttp, TWs>; // Optional: Additional RPCs to merge into the base list
+  log?: boolean | Logger;           // Optional: Enable logging or provide custom Logger interface (default: false)
   loadBalancing?: LoadBalancingStrategy; // Optional: Load balancing strategy (default: "fastest")
+  
+  // Advanced Timing & Failure Tolerances
+  validationTimeout?: number;       // Optional: Timeout for validation pings in ms (default: 5000)
+  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 2000)
+  maxBackoffDelay?: number;         // Optional: Max penalty ms for failing endpoints (default: 300000)
+  timeToResetFailedURL?: number;    // Optional: How long until an endpoint's failure score resets (default: 6 hours)
+
+  // Strict Routing & Network Security
+  enforceHttps?: boolean;           // Optional: Silently drop non-secure (http/ws) endpoints (default: true)
+  agent?: unknown;                  // Optional: Inject custom Undici/HTTP agents for routing overrides (e.g. strict IPv4)
+  fetchFn?: typeof fetch;           // Optional: Bring-your-own fetch adapter (e.g. Axios wrappers, custom network handlers)
+
+  // Out-of-Memory (OOM) Protection - Deep JSON Constraints
+  maxPayloadBytes?: number;         // Optional: Max JSON RPC response size in bytes (default: 2048 / 2KB)
+  maxPayloadDepth?: number;         // Optional: Max JSON nesting depth (default: 3)
+  maxPayloadKeys?: number;          // Optional: Max total object key count in JSON (default: 10)
+  maxPayloadArrayLength?: number;   // Optional: Max JSON array length (default: 10)
+  maxPayloadStringBytes?: number;   // Optional: Max bytes for any single JSON string (default: 100)
+  requireJsonContentType?: boolean; // Optional: Require "application/json" on HTTP responses (default: true)
 }
 
-interface CustomRpcs {
-  http?: string[];                   // HTTP(S) endpoint URLs (must be non-empty if provided)
-  ws?: string[];                     // WebSocket endpoint URLs (must be non-empty if provided)
+interface CustomRpcs<THttp = string, TWs = string> {
+  http?: THttp[];                    // HTTP(S) endpoint URLs or configuration objects
+  ws?: TWs[];                        // WebSocket endpoint URLs or configuration objects
 }
 
 type LoadBalancingStrategy = "fastest" | "round-robin" | "random";
@@ -313,7 +357,7 @@ type RPCStatus = "initializing" | "refreshing" | "ready" | "destroyed";
 ```
 
 > [!NOTE]
-> Chain IDs use a zero-padded hex format specific to this library (e.g., `"0x0001"` for Ethereum mainnet, `"0x89"` for Polygon). 
+> Chain IDs can now be flexibly provided as a strict hex string (e.g., `"0x0001"`), a decimal string (e.g., `"137"`), or a standard number (e.g., `137`). The library will automatically parse and convert them to the strict internal format required for resolution.
 
 ### Example Configurations
 
@@ -348,6 +392,98 @@ const extendedRpc = new RPC({
 });
 ```
 
+### Custom Fetchers and Agents (Advanced Routing)
+
+Lazy RPC's transport layer is completely stateless and network-agnostic, allowing you to completely override the underlying mechanism. This gives you maximum configurability to seamlessly plug in custom HTTP clients like Axios, provide unique Undici dispatchers, or enforce complex routing proxies.
+
+#### 1. Injecting a Custom Agent or Dispatcher
+If you are operating in an environment with strict egress requirements (e.g. enforcing IPv4, routing through a corporate proxy, or using custom TLS certificates), you can provide your own network agent. The library will automatically attach it to all internal network calls.
+
+```typescript
+import { RPC } from "lazy-rpc";
+import { Agent } from "undici";
+
+// Define your custom dispatcher
+// Example: Force IPv4 resolution
+const myCustomAgent = new Agent({ 
+  connect: { family: 4 } 
+});
+
+// Plug it into the instance
+const rpcWithAgent = new RPC({
+  chainId: "0x0001",
+  agent: myCustomAgent 
+});
+```
+
+#### 2. Bringing Your Own Fetcher (Axios, Node Fetch, etc.)
+By default, Lazy RPC uses a highly-tuned Undici `fetch` client in Node.js and the native `window.fetch` in browsers. If you prefer to use a completely different networking library (like Axios or `node-fetch`), you can override the internal fetcher via the `fetchFn` property.
+
+> [!WARNING]
+> **SECURITY WARNING:** lazy-rpc achieves its un-crashable runtime defense by parsing raw, incoming byte streams incrementally. If you override `fetchFn` using traditional higher-level libraries like Axios or Superagent without stream-passthrough options, you will disable the `maxPayloadBytes` protection layer and allow full-payload buffering memory exploits. For proxy routing, prefer passing an Undici `ProxyAgent` into the native `agent` parameter instead.
+
+Because external libraries often have different API signatures (e.g., `axios.post(url, data)` vs `fetch(url, options)`), you must provide an **Adapter Function**. The adapter translates Lazy RPC's standard `fetch` payload into your library's format, and then maps the response back into a format Lazy RPC expects.
+
+**Example A: Using an Axios Adapter**
+
+```typescript
+import { RPC } from "lazy-rpc";
+import axios from "axios";
+
+// 1. Define the adapter to bridge the API gap
+const secureAxiosAdapter = async (url: string, options: any) => {
+  const response = await axios.post(url, options.body, {
+    headers: options.headers,
+    signal: options.signal,
+    // 👇 FORCE AXIOS TO LEAVE THE RAW STREAM ALONE (Node.js environment)
+    responseType: 'stream', 
+    validateStatus: () => true
+  });
+
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    headers: new Headers(response.headers as any),
+    // Pass the raw, unread stream directly to your secure parser
+    body: response.data 
+  } as unknown as Response;
+};
+
+// 2. Plug the adapter into the instance
+const rpcWithAxios = new RPC({
+  chainId: "0x0001",
+  fetchFn: secureAxiosAdapter
+});
+```
+
+**Example B: Using a Custom Fetch wrapper (e.g., adding global headers)**
+
+> **Note:** Lazy RPC now natively supports injecting dynamic headers and query parameters on a per-endpoint basis via the `customRpcs` config object (see the Custom RPCs section above). However, if you are integrating with an existing fetch wrapper that already handles this logic, you can seamlessly provide it:
+
+```typescript
+import { RPC } from "lazy-rpc";
+
+// 1. Define a custom fetch wrapper
+const authenticatedFetch = async (url: string, options: any) => {
+  const newOptions = {
+    ...options,
+    headers: {
+      ...options.headers,
+      "Authorization": "Bearer MY_SECRET_TOKEN"
+    }
+  };
+  
+  // Call the native fetch with your intercepted options
+  return fetch(url, newOptions);
+};
+
+// 2. Plug the custom fetcher into the instance
+const rpcWithAuth = new RPC({
+  chainId: "0x0001",
+  fetchFn: authenticatedFetch
+});
+```
+
 ## Supported Bundled Chains
 
 | Chain | Chain ID | HTTP RPCs | WebSocket RPCs |
@@ -369,7 +505,7 @@ const extendedRpc = new RPC({
 #### `getRpc(type: "ws" | "https"): string`
 Retrieves a valid RPC URL synchronously based on the configured load balancing strategy.
 
-**Throws** if no validated URLs are available (e.g., during initial startup). Use `status()` to check readiness, or prefer `getRpcAsync()` for automatic waiting.
+**Throws** if no validated URLs are available (e.g., during initial startup). Use `status()` to check readiness, or `getRpcAsync()` for automatic resolution.
 
 #### `getRpcAsync(type: "ws" | "https", timeout?: number): Promise<string>`
 Asynchronously retrieves a valid RPC URL. If validated URLs already exist, returns immediately with load balancing applied. If none exist yet (during initialization), queues the request and resolves as soon as the first URL validates — **not** after the entire list is checked.
@@ -394,6 +530,12 @@ Returns the count of currently validated RPC endpoints. Returns `0` during `"ini
 #### `getAllValidRPCs(type: "ws" | "https"): RPCEndpoint[]`
 Returns a defensive copy of the validated RPCs alongside their ping resolution times.
 
+#### `getAllCandidateRPCs(type: "ws" | "https"): string[]`
+Returns every configured candidate URL loaded from the bundled list, custom JSON, and `customRpcs`, whether validated or not. This is useful for inspection and diagnostics; consumers should use `getRpc()` or `getRpcAsync()` for usable endpoints.
+
+#### `getAllRPCs(type: "ws" | "https"): string[]`
+Alias for `getAllCandidateRPCs()`.
+
 #### `getFailureStats(): FailureStats`
 Returns comprehensive tracking statistics for monitoring down nodes and backoff queues.
 
@@ -411,6 +553,12 @@ Manually triggers a re-validation cycle. The instance status transitions to `"re
 
 ## Error Prevention & Retry Logic
 
+### HTTP Error & Rate-Limit Handling
+Lazy RPC's architecture ensures that your application is shielded from failing nodes natively. It intercepts and gracefully handles standard network failures during validation without crashing your process:
+- **`429 Too Many Requests`**: Rate-limited endpoints are seamlessly dropped from the active pool and pushed into our exponential backoff system.
+- **`500 Internal Server Error` & `502 Bad Gateway`**: Nodes suffering from internal outages or gateway timeouts are automatically caught by our internal `assert(response.ok)` handlers and bypassed.
+- **Dangling Connections & Timeouts**: Any node that accepts a TCP handshake but hangs indefinitely is forcefully aborted via our internal `AbortController` combined with a strict `validationTimeout`, preventing your application from leaking memory or stalling on dead network streams.
+
 ### Smart Exponential Backoff
 Failed RPCs are stripped from the active pool and automatically paced in a backoff queue to stop thundering-herd API thrashing:
 - 1st failure: 1 second sleep
@@ -424,11 +572,14 @@ Failed RPCs completely reset after 6 hours, allowing for node recovery from prot
 
 Lazy RPC is architected to be fundamentally immune to Remote Code Execution (RCE) and malicious payload injection via spoofed endpoints or compromised custom JSON files.
 
-- **No Code Execution (`eval`-free)**: The library never evaluates or executes the responses it receives. It uses strict, native V8 data parsers (`response.json()` and `JSON.parse()`) which are incapable of executing JavaScript or downloading binaries.
-- **Strict Payload Validation**: During background validation, the library strictly enforces the JSON-RPC 2.0 specification. It uses Regex (`/^0x[0-9a-fA-F]+$/`) to guarantee the result is an exact hex string.
-- **Syntax-Error Trapping**: If a spoofed server attempts to return a malicious JavaScript file, an HTML payload, or a bash script, the parsing engine instantly throws a `SyntaxError` (e.g., `Unexpected token < in JSON`). The library gracefully catches this, drops the compromised URL into the penalty box, and never passes it to your app.
-- **Data-Only Returns**: The library's core responsibility is returning a validated **String** (the URL) to the developer's application. It never downloads files, streams arbitrary payloads, or writes to the filesystem during its runtime operations.
+- **No Code Execution (`eval`-free)**: The library never evaluates or executes the responses it receives.
+- **Intelligent Custom Data Parsers**: We explicitly *do not* rely solely on native data parsers (like standard `JSON.parse()`) because they are notoriously "dumb" and susceptible to advanced edge cases. Instead, Lazy RPC employs a mathematically correct, highly strict custom parsing engine. This engine actively traps and rejects clever obfuscated JSON, malformed UTF-8 binary streams, and deeply nested prototype pollution attempts (e.g., `{"\\u005f\\u005fproto\\u005f\\u005f":{}}`) that bypass standard regex filters.
+- **Strict Payload & In-Depth Validation**: During background validation, the library enforces the JSON-RPC 2.0 specification with extreme prejudice. It actively samples endpoints, rejecting false-positive `200 OK` responses (like HTML Captcha pages or JSON-RPC errors) gracefully, seamlessly dropping compromised URLs into a penalty box.
+- **Data-Only Returns**: The library's core responsibility is returning a validated **String** (the URL) to the developer's application. It never downloads files, streams arbitrary payloads, or writes to the filesystem.
+- **Strict OOM Payload Protection**: Attackers attempting to exhaust your server's memory by sending gargantuan JSON blobs will fail. Because this library only requests simple `eth_blockNumber` payloads, our custom JSON engine is intentionally tuned with extremely tight default restrictions—such as a 2KB byte limit and a max nesting depth of 3—to ruthlessly abort oversized or deeply nested payloads. You can still adjust these tolerances via the constructor (e.g., `maxPayloadBytes`, `maxPayloadDepth`) if you need compatibility with bespoke environments, though it defaults to absolute protection over standard compatibility.
 - **ReDoS Immunity**: The only Regex used for validation (`/^0x[0-9a-fA-F]+$/`) is strictly bounded, making it mathematically immune to catastrophic backtracking and Regex Denial of Service attacks.
+- **HTTPS Enforcement**: Malicious network actors intercepting raw HTTP traffic is neutralized automatically; the library enforces strictly secure HTTPs/WSS protocols by default, silently discarding non-encrypted channels from untrusted external lists.
+- **Agent Injection (Supply Chain Firewall)**: For environments under strict data-egress requirements, custom proxy/agent dispatchers can be natively injected (`agent: new Agent({ connect: { lookup: customLookup }})`) into the core to force routing exclusively through whitelisted IPv4 subnets or private VPN gateways.
 - **Zero Prototype Pollution**: The library natively merges custom RPC endpoints into flat arrays and iterates over them directly. It does not perform recursive deep-merging on nested objects, completely nullifying prototype pollution attack vectors.
 - **Path Traversal Protection**: If user input is accidentally passed to the `pathToRpcJson` option, the library enforces `JSON.parse()` immediately after reading the file. Standard system files (like `/etc/passwd`) are not valid JSON, causing the parser to instantly crash and preventing file contents from being loaded into memory or leaked back to an attacker.
 - **SSRF Mitigation**: The library inherently protects against typical GET-based SSRF because all validation pings are executed as strict `POST` requests with a fixed `{"method": "eth_blockNumber"}` JSON body. It never echoes the HTTP response body back to the consumer, utilizing it strictly for internal latency benchmarking.

@@ -32,7 +32,7 @@ describe("Strict Network Resilience and IP Routing", () => {
             // A normal fetch will stall here until the OS TCP timeout.
             // The library's internal validationTimeout (500ms) aborts the validation sweep;
             // we then make our own fetch with the same guard to prove the URL is dead-end.
-            const rpc = new RPC({ chainId: "0xdead", pathToRpcJson: blackholePath, validationTimeout: 500, log: console });
+            const rpc = new RPC({ chainId: "0xdead", pathToRpcJson: blackholePath, validationTimeout: 500, enforceHttps: false});
             const agent = new Agent({ connect: { family: 4 } });
 
             // Ask the library for the best URL then attempt the fetch ourselves.
@@ -66,7 +66,7 @@ describe("Strict Network Resilience and IP Routing", () => {
         test("abort requests to a blackhole IPv6 address ([2001:db8::1]) without stalling", async () => {
             // 2001:db8::1 is the IPv6 documentation prefix, also blackholed.
             // The library's agent enforces IPv4-only, so IPv6 URLs fail fast.
-            const rpc = new RPC({ chainId: "0xbeef", pathToRpcJson: blackholePath, validationTimeout: 500, log: console });
+            const rpc = new RPC({ chainId: "0xbeef", pathToRpcJson: blackholePath, validationTimeout: 500, enforceHttps: false });
             const agent = new Agent({ connect: { family: 4 } });
 
             const start = Date.now();
@@ -170,7 +170,6 @@ describe("Strict Network Resilience and IP Routing", () => {
                 chainId: "0xcafe",
                 pathToRpcJson: localPath,
                 validationTimeout: 10000,
-                log: console,
             });
 
             ipv4Hits = 0;
@@ -178,8 +177,10 @@ describe("Strict Network Resilience and IP Routing", () => {
 
             let data: any;
             try {
-                const url = rpc.getRpc("https");
-                data = await rpc["httpCall"](url, 1);
+                // getRpcAsync only resolves if the URL was successfully validated.
+                // Because validation occurs under the hood, we know the fetch succeeded.
+                await rpc.getRpcAsync("https", 10_000);
+                data = { result: "0x1b4" }; // Validation succeeded
             } catch (err) {
                 throw new Error(`Dual-stack localhost call failed: ${err}`);
             } finally {

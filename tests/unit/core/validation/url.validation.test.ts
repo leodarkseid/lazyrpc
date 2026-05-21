@@ -1,6 +1,5 @@
 import {
   filterSecureUrls,
-  formatChainId,
   mergeCustomUrls,
   validateUrl,
 } from "../../../../src/core/validation/url.validation";
@@ -24,7 +23,7 @@ describe("core/validation/url.validation", () => {
       expect(() => validateUrl("not a url", "http", {
         shouldThrow: true,
         label: "customRpcs.http",
-      })).toThrow('Invalid URL in customRpcs.http: "not a url" is not a valid URL');
+      })).toThrow("Invalid URL in customRpcs.http: \"not a url\" is not a valid URL");
     });
 
     test("rejects HTTP URLs with WebSocket protocols", () => {
@@ -42,21 +41,37 @@ describe("core/validation/url.validation", () => {
 
   describe("mergeCustomUrls", () => {
     test("returns the original base list when custom URLs are omitted", () => {
-      const base = ["https://rpc.example"];
+      const base: any = [{url: "https://rpc.example", originalFormat: "string" as const}];
 
       expect(mergeCustomUrls(base, undefined, "http")).toBe(base);
     });
 
     test("validates, merges, and deduplicates custom URLs", () => {
       expect(mergeCustomUrls(
-        ["https://rpc.example"],
+        [{url: "https://rpc.example", originalFormat: "string" as const}],
         ["https://rpc.example", "https://custom.example"],
         "http",
-      )).toEqual(["https://rpc.example", "https://custom.example"]);
+      )).toEqual([{url: "https://rpc.example", originalFormat: "string" as const}, {url: "https://custom.example", originalFormat: "string" as const}]);
+    });
+
+    test("validates, merges, and deduplicates custom endpoint objects", () => {
+      expect(mergeCustomUrls(
+        [{url: "https://rpc.example", originalFormat: "string" as const}],
+        [
+          "https://rpc.example", 
+          "https://custom.example", 
+          { url: "https://custom2.example", headers: { "Authorization": "Bearer 123" } }
+        ],
+        "http",
+      )).toEqual([
+        {url: "https://rpc.example", originalFormat: "string" as const}, 
+        {url: "https://custom.example", originalFormat: "string" as const},
+        {url: "https://custom2.example", headers: { "Authorization": "Bearer 123" }, originalFormat: "object" as const}
+      ]);
     });
 
     test("throws for empty custom URL arrays", () => {
-      expect(() => mergeCustomUrls([], [], "ws")).toThrow("customRpcs.ws must be a non-empty array");
+      expect(() => mergeCustomUrls([], [], "ws")).toThrow("customRpcs.ws array cannot be empty");
     });
 
     test("throws for invalid custom URL protocols", () => {
@@ -67,39 +82,48 @@ describe("core/validation/url.validation", () => {
   describe("filterSecureUrls", () => {
     test("keeps HTTPS endpoints and local HTTP endpoints", () => {
       expect(filterSecureUrls([
-        "https://rpc.example",
-        "http://rpc.example",
-        "http://localhost:8545",
-        "http://127.0.0.1:8545",
+        { url: "https://rpc.example", originalFormat: "string" as const },
+        { url: "http://rpc.example", originalFormat: "string" as const },
+        { url: "http://localhost:8545", originalFormat: "string" as const },
+        { url: "http://127.0.0.1:8545", originalFormat: "string" as const },
       ], "http")).toEqual([
-        "https://rpc.example",
-        "http://localhost:8545",
-        "http://127.0.0.1:8545",
+        { url: "https://rpc.example", originalFormat: "string" as const },
+        { url: "http://localhost:8545", originalFormat: "string" as const },
+        { url: "http://127.0.0.1:8545", originalFormat: "string" as const },
       ]);
     });
 
     test("keeps WSS endpoints and local WS endpoints", () => {
       expect(filterSecureUrls([
-        "wss://rpc.example",
-        "ws://rpc.example",
-        "ws://localhost:8546",
-        "ws://127.0.0.1:8546",
+        { url: "wss://rpc.example", originalFormat: "string" as const },
+        { url: "ws://rpc.example", originalFormat: "string" as const },
+        { url: "ws://localhost:8546", originalFormat: "string" as const },
+        { url: "ws://127.0.0.1:8546", originalFormat: "string" as const },
       ], "ws")).toEqual([
-        "wss://rpc.example",
-        "ws://localhost:8546",
-        "ws://127.0.0.1:8546",
+        { url: "wss://rpc.example", originalFormat: "string" as const },
+        { url: "ws://localhost:8546", originalFormat: "string" as const },
+        { url: "ws://127.0.0.1:8546", originalFormat: "string" as const },
       ]);
     });
-  });
 
-  describe("formatChainId", () => {
-    test.each([
-      ["0x1", "x0001"],
-      ["0x0001", "x0001"],
-      ["0x89", "x89"],
-      ["0xA", "xa"],
-    ])("formats %s as %s", (chainId, expected) => {
-      expect(formatChainId(chainId)).toBe(expected);
+    test("keeps IPv6 localhost [::1] for both HTTP and WS", () => {
+      expect(filterSecureUrls([
+        { url: "http://[::1]:8545", originalFormat: "string" as const },
+        { url: "http://rpc.example", originalFormat: "string" as const },
+        { url: "https://rpc.example", originalFormat: "string" as const },
+      ], "http")).toEqual([
+        { url: "http://[::1]:8545", originalFormat: "string" as const },
+        { url: "https://rpc.example", originalFormat: "string" as const },
+      ]);
+
+      expect(filterSecureUrls([
+        { url: "ws://[::1]:8546", originalFormat: "string" as const },
+        { url: "ws://rpc.example", originalFormat: "string" as const },
+        { url: "wss://rpc.example", originalFormat: "string" as const },
+      ] as any, "ws")).toEqual([
+        { url: "ws://[::1]:8546", originalFormat: "string" as const },
+        { url: "wss://rpc.example", originalFormat: "string" as const },
+      ]);
     });
   });
 });

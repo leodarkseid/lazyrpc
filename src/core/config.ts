@@ -7,14 +7,14 @@
  * @module config
  */
 
-import { RPCConfig, RPCDependencies, LoadBalancingStrategy, CustomRpcs } from "../types.js";
+import { RPCConfig, RPCDependencies, LoadBalancingStrategy, CustomRpcs, InternalRpcEndpoint, HttpRpcEndpointOptions } from "../types.js";
 import { validateConfig } from "./validation/config.validation.js";
 import {
-  formatChainId,
   mergeCustomUrls,
   filterSecureUrls,
 } from "./validation/url.validation.js";
 import { Logger, defaultLogger, silentLogger } from "./logger.js";
+import { LazyRpcError } from "./error.js";
 
 /**
  * The final immutable runtime configuration for the RPC class.
@@ -34,7 +34,14 @@ export interface _InternalRpcConfig {
   readonly timeToResetFailedURL: number;
   readonly fetchFn: typeof fetch;
   readonly websocketClass: typeof WebSocket;
-  readonly agent: any;
+  readonly agent: unknown;
+  readonly maxPayloadBytes: number;
+  readonly maxPayloadDepth: number;
+  readonly maxPayloadKeys: number;
+  readonly maxPayloadArrayLength: number;
+  readonly maxPayloadStringBytes: number;
+  readonly requireJsonContentType: boolean;
+  readonly errorPrefix: string;
 }
 
 /**
@@ -45,15 +52,51 @@ export interface _InternalRpcConfig {
  * @returns Frozen internal config object
  * @throws Error if config validation fails
  */
-export function buildInternalConfig(
-  config: RPCConfig,
+function parseChainId(input: string | number): string {
+  let cleanHex: string;
+
+  if (typeof input === "number") {
+    if (!Number.isSafeInteger(input) || input < 0) {
+      throw new LazyRpcError("chainId number must be a positive integer", "Config Builder");
+    }
+    cleanHex = input.toString(16);
+  } else if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (/^0x[0-9a-fA-F]+$/i.test(trimmed)) {
+      cleanHex = trimmed.slice(2).toLowerCase();
+    } else if (/^\d+$/.test(trimmed)) {
+      if (trimmed.length > 1 && trimmed.startsWith("0")) {
+        cleanHex = trimmed.toLowerCase();
+      } else {
+        cleanHex = parseInt(trimmed, 10).toString(16);
+      }
+    } else if (/^[0-9a-fA-F]+$/i.test(trimmed)) {
+      cleanHex = trimmed.toLowerCase();
+    } else {
+      throw new LazyRpcError("chainId must be in hex format", "Config Builder");
+    }
+  } else {
+    throw new LazyRpcError("chainId must be a string or number", "Config Builder");
+  }
+
+  if (cleanHex === "1" || cleanHex === "0001") {
+    return "x0001";
+  }
+
+  return `x${cleanHex}`;
+}
+
+export function buildInternalConfig<THttp = string, TWs = string>(
+  config: RPCConfig<THttp, TWs>,
   deps: RPCDependencies,
 ): _InternalRpcConfig {
   validateConfig(config);
 
+  const parsedChainId = parseChainId(config.chainId);
+
   let logger: Logger
   if (config.log && typeof config.log === "object") {
-    logger = config.log as Logger
+    logger = config.log
   } else if (config.log === true) {
     logger = defaultLogger
   } else {
@@ -61,7 +104,7 @@ export function buildInternalConfig(
   }
 
   const internal: _InternalRpcConfig = {
-    chainId: config.chainId,
+    chainId: parsedChainId,
     ttl: config.ttl ?? 10,
     maxRetry: config.maxRetry ?? 3,
 
@@ -71,10 +114,17 @@ export function buildInternalConfig(
     maxBackoffDelay: config.maxBackoffDelay ?? 300000,
     validationTimeout: config.validationTimeout ?? 5000,
     enforceHttps: config.enforceHttps ?? true,
-    timeToResetFailedURL: 6 * 60 * 60 * 1000,
+    timeToResetFailedURL: config.timeToResetFailedURL ?? 6 * 60 * 60 * 1000,
     fetchFn: deps.fetchFn,
     websocketClass: deps.websocketClass,
-    agent: deps.agent,
+    agent: config.agent !== undefined ? config.agent : deps.agent,
+    maxPayloadBytes: config.maxPayloadBytes ?? 2048,
+    maxPayloadDepth: config.maxPayloadDepth ?? 3,
+    maxPayloadKeys: config.maxPayloadKeys ?? 10,
+    maxPayloadArrayLength: config.maxPayloadArrayLength ?? 10,
+    maxPayloadStringBytes: config.maxPayloadStringBytes ?? 100,
+    requireJsonContentType: config.requireJsonContentType ?? true,
+    errorPrefix: config.errorPrefix ?? "LazyRpc",
   };
 
   return Object.freeze(internal);
@@ -84,8 +134,8 @@ export function buildInternalConfig(
  * Result of resolving base URLs from a chain list + custom RPCs.
  */
 export interface ResolvedUrls {
-  readonly http: string[];
-  readonly ws: string[];
+  readonly http: InternalRpcEndpoint[];
+  readonly ws: InternalRpcEndpoint[];
 }
 
 /**
@@ -101,36 +151,42 @@ export interface ResolvedUrls {
  * @returns Resolved and deduplicated HTTP and WS URL arrays
  * @throws Error if chainList is missing or chainId not found
  */
-export function resolveBaseUrls(
+export function resolveBaseUrls<THttp = string, TWs = string>(
   chainList: Record<string, string[]> | null | undefined,
   chainId: string,
-  customRpcs?: CustomRpcs,
-  enforceHttps: boolean = true,
+  customRpcs?: CustomRpcs<THttp, TWs>,
+  enforceHttps = true,
+  errorPrefix = "LazyRpc"
 ): ResolvedUrls {
   if (!chainList) {
-    throw new Error("Chain list must be provided to dependencies");
+    throw new LazyRpcError("Chain list must be provided to dependencies", "Config Builder", errorPrefix);
   }
 
-  const formattedChainId = formatChainId(chainId);
-  const httpRaw = chainList[formattedChainId];
+  let normalizedId = chainId;
+  if (chainId.startsWith("0x") || chainId.startsWith("0X")) {
+    const cleanHex = chainId.slice(2).toLowerCase();
+    normalizedId = (cleanHex === "1" || cleanHex === "0001") ? "x0001" : `x${cleanHex}`;
+  }
+
+  const httpRaw = chainList[normalizedId];
 
   if (!httpRaw) {
-    throw new Error(`Chain ID ${chainId} not found in RPC list`);
+    let displayId = normalizedId.replace(/^x/, "0x");
+    if (displayId === "0x0001") displayId = "0x1";
+    throw new LazyRpcError(`Chain ID ${displayId} not found in RPC list`, "Config Builder", errorPrefix);
   }
 
-  const wsRaw = chainList[`${formattedChainId}_WS`] || [];
+  const wsRaw = chainList[`${normalizedId}_WS`] ?? [];
 
-  // Deduplicate base lists
-  let httpUrls = Array.from(new Set(httpRaw));
-  let wsUrls = Array.from(new Set(wsRaw));
 
-  // Merge custom RPCs (validates strictly, throws on bad URLs)
+  let httpUrls: InternalRpcEndpoint[] = Array.from(new Set(httpRaw)).map(url => ({ url, originalFormat: "string" }));
+  let wsUrls: InternalRpcEndpoint[] = Array.from(new Set(wsRaw)).map(url => ({ url, originalFormat: "string" }));
+
   if (customRpcs && Object.keys(customRpcs).length > 0) {
-    httpUrls = mergeCustomUrls(httpUrls, customRpcs.http, "http");
-    wsUrls = mergeCustomUrls(wsUrls, customRpcs.ws, "ws");
+    httpUrls = mergeCustomUrls(httpUrls, customRpcs.http as (string | HttpRpcEndpointOptions)[] | undefined, "http");
+    wsUrls = mergeCustomUrls(wsUrls, customRpcs.ws as (string | HttpRpcEndpointOptions)[] | undefined, "ws");
   }
 
-  // Enforce HTTPS/WSS
   if (enforceHttps) {
     httpUrls = filterSecureUrls(httpUrls, "http");
     wsUrls = filterSecureUrls(wsUrls, "ws");

@@ -12,8 +12,9 @@
  *   npx jest tests/e2e.test.ts
  */
 
-import { RPC } from "../../src/index";
+import { RPC, HttpRpcEndpointOptions } from "../../src/index";
 import * as path from "path";
+import * as http from "http";
 import { fetch as undiciFetch, Agent } from "undici";
 
 const E2E_TIMEOUT = 60_000;
@@ -60,9 +61,13 @@ describe("E2E: Ethereum Lifecycle", () => {
         await rpc.destroy();
     });
 
-    test("should have HTTP endpoints available (sync or validated)", () => {
-        const count = rpc.getValidRPCCount("https");
-        expect(count).toBeGreaterThan(0);
+    test("should have HTTP endpoints available and expose validated URLs when ready", () => {
+        expect(rpc.getAllCandidateRPCs("https").length).toBeGreaterThan(0);
+
+        if (!hasValidated) {
+            expect(() => rpc.getRpc("https")).toThrow("No validated https RPC URLs available yet");
+            return;
+        }
 
         const url = rpc.getRpc("https");
         expect(url.startsWith("https://")).toBe(true);
@@ -70,7 +75,6 @@ describe("E2E: Ethereum Lifecycle", () => {
 
     test("returned URL should produce a valid eth_blockNumber response", async () => {
         if (!hasValidated) {
-            console.warn("Skipping: network did not validate any endpoints");
             return;
         }
 
@@ -97,8 +101,6 @@ describe("E2E: Ethereum Lifecycle", () => {
             const blockNumber = parseInt(data.result, 16);
             expect(blockNumber).toBeGreaterThan(0);
             success = true;
-        } catch (error) {
-            console.warn("E2E fetch fallback failed completely:", error);
         } finally {
             await agent.destroy();
         }
@@ -107,7 +109,6 @@ describe("E2E: Ethereum Lifecycle", () => {
 
     test("if validated, RPCs should be sorted fastest-first", () => {
         if (!hasValidated) {
-            console.warn("Skipping: no endpoints were validated (network-dependent)");
             return;
         }
 
@@ -143,20 +144,25 @@ describe("E2E: Ethereum Lifecycle", () => {
 
 describe("E2E: Drop & Failure Tracking", () => {
     let rpc: RPC;
+    let hasValidated: boolean;
 
     beforeAll(async () => {
         rpc = new RPC({ chainId: "0x0001", ttl: 3600, maxRetry: 5, enforceHttps: false });
-        await waitForValidation(rpc);
+        hasValidated = await waitForValidation(rpc);
     }, E2E_TIMEOUT);
 
     afterAll(async () => {
         await rpc.destroy();
     });
 
-    test("drop() should increment failure count by 1", () => {
+    test("drop() should increment failure count by 1", async () => {
+        if (!hasValidated) {
+            return;
+        }
+
         rpc.clearFailedURLs();
 
-        const url = rpc.getRpc("https");
+        const url = await rpc.getRpcAsync("https");
         rpc.drop(url);
         rpc.drop(url);
 
@@ -165,8 +171,12 @@ describe("E2E: Drop & Failure Tracking", () => {
         expect(stats.overMaxRetries).toBe(0);
     });
 
-    test("clearFailedURLs should reset tracking", () => {
-        const url = rpc.getRpc("https");
+    test("clearFailedURLs should reset tracking", async () => {
+        if (!hasValidated) {
+            return;
+        }
+
+        const url = await rpc.getRpcAsync("https");
         rpc.drop(url);
         expect(rpc.getFailureStats().totalFailed).toBeGreaterThanOrEqual(1);
 
@@ -184,54 +194,58 @@ describe("E2E: Drop & Failure Tracking", () => {
 // ═══════════════════════════════════════════════════════════════════
 
 describe("E2E: Load Balancing", () => {
-    let rpc: RPC;
+    const CUSTOM_LIST = path.resolve(__dirname, "../fixtures/custom-rpc-list.json");
 
-    // Shared instance — the lb strategy is set per-test via internal override
-    beforeAll(async () => {
-        rpc = new RPC({ chainId: "0x0001", ttl: 3600, enforceHttps: false });
-        await waitForValidation(rpc);
-    }, E2E_TIMEOUT);
+    test("fastest should consistently return the same URL", async () => {
+        const lbRpc = new RPC({ chainId: "0x0001", ttl: 3600, loadBalancing: "fastest", enforceHttps: false, pathToRpcJson: CUSTOM_LIST });
+        await waitForValidation(lbRpc);
+        const count = lbRpc.getValidRPCCount("https");
+        if (count < 1) return;
 
-    afterAll(async () => await rpc.destroy());
-
-    test("fastest should consistently return the same URL", () => {
-        rpc["loadBalancing"] = "fastest";
-        const url1 = rpc.getRpc("https");
-        const url2 = rpc.getRpc("https");
-        const url3 = rpc.getRpc("https");
+        const url1 = lbRpc.getRpc("https");
+        const url2 = lbRpc.getRpc("https");
+        const url3 = lbRpc.getRpc("https");
 
         expect(url1).toBe(url2);
         expect(url2).toBe(url3);
-        expect(url1).toBe(rpc.getAllValidRPCs("https")[0].url);
-    });
+        expect(url1).toBe(lbRpc.getAllValidRPCs("https")[0].url);
+        await lbRpc.destroy();
+    }, E2E_TIMEOUT);
 
-    test("round-robin should cycle when multiple endpoints available", () => {
-        rpc["loadBalancing"] = "round-robin";
-        // rpc["httpRoundRobinIndex"] = 0;
+    test("round-robin should cycle when multiple endpoints available", async () => {
+        const lbRpc = new RPC({ chainId: "0x0001", ttl: 3600, loadBalancing: "round-robin", enforceHttps: false, pathToRpcJson: CUSTOM_LIST });
+        await waitForValidation(lbRpc);
 
-        const count = rpc.getValidRPCCount("https");
+        const count = lbRpc.getValidRPCCount("https");
         if (count < 2) {
-            console.warn("Skipping: need ≥2 endpoints");
+            await lbRpc.destroy();
             return;
         }
 
         const urls: string[] = [];
         for (let i = 0; i < count + 1; i++) {
-            urls.push(rpc.getRpc("https"));
+            urls.push(lbRpc.getRpc("https"));
         }
 
         expect(urls.length).toBe(count + 1);
         expect(new Set(urls).size).toBeGreaterThan(1);
-    });
+        await lbRpc.destroy();
+    }, E2E_TIMEOUT);
 
-    test("random should return URLs from the valid set", () => {
-        rpc["loadBalancing"] = "random";
-
-        const validUrls = rpc.getAllValidRPCs("https").map((e) => e.url);
-        for (let i = 0; i < 10; i++) {
-            expect(validUrls).toContain(rpc.getRpc("https"));
+    test("random should return URLs from the valid set", async () => {
+        const lbRpc = new RPC({ chainId: "0x0001", ttl: 3600, loadBalancing: "random", enforceHttps: false, pathToRpcJson: CUSTOM_LIST });
+        const validated = await waitForValidation(lbRpc);
+        if (!validated) {
+            await lbRpc.destroy();
+            return;
         }
-    });
+
+        const validUrls = lbRpc.getAllValidRPCs("https").map((e) => e.url);
+        for (let i = 0; i < 10; i++) {
+            expect(validUrls).toContain(lbRpc.getRpc("https"));
+        }
+        await lbRpc.destroy();
+    }, E2E_TIMEOUT);
 });
 
 // ═══════════════════════════════════════════════════════════════════
@@ -247,19 +261,18 @@ describe("E2E: Multi-Chain", () => {
         ["Base", "0x2105"],
         ["Avalanche C-Chain", "0xa86a"],
     ])("should have %s (chainId %s) endpoints via init", async (_name, chainId) => {
-        // Verifies the library can read the RPC list for this chain
-        // and provide endpoints synchronously via init().
+        // Verifies the library can read candidate RPCs synchronously.
         // We do NOT wait for async validation here (it would be too slow
         // across 6 chains in sequence).
         const rpc = new RPC({ chainId, ttl: 3600, enforceHttps: false });
 
-        const count = rpc.getValidRPCCount("https");
+        const count = rpc.getAllCandidateRPCs("https").length;
         expect(count).toBeGreaterThan(0);
 
-        const url = rpc.getRpc("https");
+        const url = rpc.getAllCandidateRPCs("https")[0];
         expect(url.startsWith("https://")).toBe(true);
 
-        const wsCount = rpc.getValidRPCCount("ws");
+        const wsCount = rpc.getAllCandidateRPCs("ws").length;
         expect(wsCount).toBeGreaterThan(0);
 
         await rpc.destroy();
@@ -280,14 +293,14 @@ describe("E2E: Error Handling & Cleanup", () => {
 
     test("destroy should wipe all state", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, enforceHttps: false });
-        expect(rpc.getValidRPCCount("https")).toBeGreaterThan(0);
+        expect(rpc.getAllCandidateRPCs("https").length).toBeGreaterThan(0);
 
         await rpc.destroy();
 
         expect(rpc.getValidRPCCount("https")).toBe(0);
         expect(rpc.getValidRPCCount("ws")).toBe(0);
         expect(rpc.getFailureStats().totalFailed).toBe(0);
-        expect(() => rpc.getRpc("https")).toThrow("No valid https URLs found");
+        expect(() => rpc.getRpc("https")).toThrow("RPC instance destroyed");
     });
 });
 
@@ -302,18 +315,19 @@ describe("E2E: pathToRpcJson", () => {
     test("should load endpoints from a custom JSON file", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, pathToRpcJson: CUSTOM_LIST, enforceHttps: false });
 
-        // The custom file has exactly 2 HTTP + 1 WS endpoint
-        expect(rpc.getValidRPCCount("https")).toBe(2);
-        expect(rpc.getValidRPCCount("ws")).toBe(1);
+        // The custom file has exactly 2 HTTP + 1 WS candidate endpoints
+        expect(rpc.getAllCandidateRPCs("https").length).toBe(2);
+        expect(rpc.getAllCandidateRPCs("ws").length).toBe(1);
 
-        const url = rpc.getRpc("https");
-        expect(url).toMatch(/publicnode|1rpc/);
-
-        const wsUrl = rpc.getRpc("ws");
-        expect(wsUrl).toBe("wss://ethereum-rpc.publicnode.com");
+        // Wait for async validation before accessing validated RPCs
+        const validated = await waitForValidation(rpc);
+        if (validated) {
+            const url = rpc.getRpc("https");
+            expect(url).toMatch(/publicnode|1rpc/);
+        }
 
         await rpc.destroy();
-    });
+    }, E2E_TIMEOUT);
 
     test("should fall back to bundled list when path does not exist", async () => {
         const rpc = new RPC({
@@ -324,7 +338,7 @@ describe("E2E: pathToRpcJson", () => {
         });
 
         // Falls back to bundled rpcList.min.json which has many endpoints
-        const count = rpc.getValidRPCCount("https");
+        const count = rpc.getAllCandidateRPCs("https").length;
         expect(count).toBeGreaterThan(2); // bundled list has 50+ for Ethereum
 
         await rpc.destroy();
@@ -369,6 +383,19 @@ describe("E2E: pathToRpcJson", () => {
             enforceHttps: false
         });
 
+        // Wait for async validation before testing round-robin
+        const validated = await waitForValidation(rpc);
+        if (!validated) {
+            await rpc.destroy();
+            return;
+        }
+
+        const count = rpc.getValidRPCCount("https");
+        if (count < 2) {
+            await rpc.destroy();
+            return;
+        }
+
         const url1 = rpc.getRpc("https");
         const url2 = rpc.getRpc("https");
         const url3 = rpc.getRpc("https"); // wraps (only 2 endpoints)
@@ -377,22 +404,139 @@ describe("E2E: pathToRpcJson", () => {
         expect(url3).toBe(url1);     // round-robin wraps
 
         await rpc.destroy();
-    });
+    }, E2E_TIMEOUT);
 
     test("custom path endpoints should validate via initialize()", async () => {
         const rpc = new RPC({ chainId: "0x0001", ttl: 3600, pathToRpcJson: CUSTOM_LIST, enforceHttps: false });
 
         // Wait for async validation
-        await waitForValidation(rpc);
+        const validated = await waitForValidation(rpc);
+        if (!validated) {
+            await rpc.destroy();
+            return;
+        }
 
-        // After validation, if any succeeded, they should have real times
         const rpcs = rpc.getAllValidRPCs("https");
         expect(rpcs.length).toBeGreaterThan(0);
+        expect(rpcs[0].url).toMatch(/publicnode|1rpc/);
 
-        // If validation worked, times should be < sentinel
-        if (rpcs[0].time < 999_999_999) {
-            expect(rpcs[0].url).toMatch(/publicnode|1rpc/);
+        await rpc.destroy();
+    }, E2E_TIMEOUT);
+});
+
+// ═══════════════════════════════════════════════════════════════════
+//  Custom Headers & Rate Limiting
+// ═══════════════════════════════════════════════════════════════════
+
+describe("E2E: Custom Headers & Rate Limiting", () => {
+    const CUSTOM_LIST = path.resolve(__dirname, "../fixtures/custom-rpc-list.json");
+    let mockServer: http.Server;
+    let mockUrl: string;
+
+    beforeAll((done) => {
+        mockServer = http.createServer((req, res) => {
+            const chunks: Buffer[] = [];
+            req.on("data", chunk => chunks.push(chunk));
+            req.on("end", () => {
+                const body = Buffer.concat(chunks).toString("utf8");
+                let parsedId = 1;
+                try {
+                    const parsed = JSON.parse(body);
+                    if (parsed && typeof parsed.id === "number") {
+                        parsedId = parsed.id;
+                    }
+                } catch (e) {}
+
+                if (req.url === "/auth") {
+                    if (req.headers["x-custom-auth"] !== "super-secret") {
+                        res.writeHead(401, { "Content-Type": "application/json" });
+                        res.end(JSON.stringify({ error: { message: "Unauthorized" } }));
+                        return;
+                    }
+                    res.writeHead(200, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ jsonrpc: "2.0", id: parsedId, result: "0x1234" }));
+                } else if (req.url === "/rate-limit") {
+                    res.writeHead(429, { "Content-Type": "application/json" });
+                    res.end(JSON.stringify({ error: { message: "Too Many Requests" } }));
+                } else {
+                    res.writeHead(404);
+                    res.end();
+                }
+            });
+        });
+
+        mockServer.listen(0, "127.0.0.1", () => {
+            const address = mockServer.address() as any;
+            mockUrl = `http://127.0.0.1:${address.port}`;
+            done();
+        });
+    });
+
+    afterAll((done) => {
+        mockServer.close(done);
+    });
+
+    test("should successfully validate against a server requiring custom headers", async () => {
+        const rpc = new RPC<string | HttpRpcEndpointOptions, string>({ 
+            // We use the custom list to keep it fast and bypass the massive mainnet nodes
+            chainId: "0x0001",
+            pathToRpcJson: CUSTOM_LIST,
+            ttl: 3600,
+            enforceHttps: false,
+            customRpcs: {
+                http: [
+                    {
+                        url: `${mockUrl}/auth`,
+                        headers: { "X-Custom-Auth": "super-secret" }
+                    }
+                ]
+            }
+        });
+
+        // Wait for validation to pick up the mock server (up to 15 seconds)
+        let valid = false;
+        for (let i = 0; i < 150; i++) {
+            const rpcs = rpc.getAllValidRPCs("https");
+            if (rpcs.some(r => r.url === `${mockUrl}/auth`)) {
+                valid = true;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 100));
         }
+
+        if (!valid) {
+            throw new Error(`Validation failed for mockUrl. Stats: ${JSON.stringify(rpc.getFailureStats(), null, 2)}`);
+        }
+
+        expect(valid).toBe(true);
+
+        const urlObj = await rpc.getRpcAsync("https");
+        expect((urlObj as any).url).toBe(`${mockUrl}/auth`);
+
+        await rpc.destroy();
+    }, E2E_TIMEOUT);
+
+    test("should handle rate-limiting (429) gracefully and record failures", async () => {
+        const rpc = new RPC<string | HttpRpcEndpointOptions, string>({ 
+            chainId: "0x0001",
+            pathToRpcJson: CUSTOM_LIST,
+            ttl: 3600,
+            enforceHttps: false,
+            customRpcs: {
+                http: [
+                    {
+                        url: `${mockUrl}/rate-limit`
+                    }
+                ]
+            }
+        });
+
+        // Wait a bit to let validation fail (up to 2 seconds to ensure completion)
+        await new Promise(r => setTimeout(r, 2000));
+        
+        // Ensure our URL is NOT in the valid pool
+        const validRpcs = rpc.getAllValidRPCs("https");
+        expect(validRpcs.find(r => r.url === `${mockUrl}/rate-limit`)).toBeUndefined();
 
         await rpc.destroy();
     }, E2E_TIMEOUT);

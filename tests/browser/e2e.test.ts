@@ -10,6 +10,8 @@ jest.mock("../../src/rpcList.min.json", () => ({
 
 import { RPC } from "../../src/browser";
 
+const jsonHeaders = { get: (name: string) => name.toLowerCase() === "content-type" ? "application/json" : null };
+
 // ---------------------------------------------------------------------------
 // window.fetch mock
 // ---------------------------------------------------------------------------
@@ -20,7 +22,13 @@ if (typeof window !== "undefined") {
       try {
         if (options?.body) id = JSON.parse(options.body).id;
       } catch { }
-      return { ok: true, status: 200, json: async () => ({ jsonrpc: "2.0", id, result: "0x10" }) } as any;
+      return {
+        ok: true,
+        status: 200,
+        headers: jsonHeaders,
+        json: async () => ({ jsonrpc: "2.0", id, result: "0x10" }),
+        text: async () => JSON.stringify({ jsonrpc: "2.0", id, result: "0x10" }),
+      } as any;
     });
 
     window.WebSocket = class MockWebSocket {
@@ -75,9 +83,13 @@ describe("Browser E2E: Ethereum Lifecycle", () => {
         rpc.destroy();
     });
 
-    test("should have HTTP endpoints available (sync or validated)", () => {
-        const count = rpc.getValidRPCCount("https");
-        expect(count).toBeGreaterThan(0);
+    test("should have HTTP endpoints available and expose validated URLs when ready", () => {
+        expect(rpc.getAllCandidateRPCs("https").length).toBeGreaterThan(0);
+
+        if (!hasValidated) {
+            expect(() => rpc.getRpc("https")).toThrow("No validated https RPC URLs available yet");
+            return;
+        }
 
         const url = rpc.getRpc("https");
         expect(url.startsWith("https://")).toBe(true);

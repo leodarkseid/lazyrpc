@@ -21,19 +21,34 @@ import { Logger } from "./core/logger";
  * });
  * ```
  */
-export interface CustomRpcs {
+export interface CustomRpcs<THttp = string, TWs = string> {
   /** HTTP(S) RPC endpoint URLs to add to the pool. Must be non-empty if provided. */
-  http?: string[];
+  http?: THttp[];
   /** WebSocket (WSS/WS) RPC endpoint URLs to add to the pool. Must be non-empty if provided. */
-  ws?: string[];
+  ws?: TWs[];
+}
+export interface HttpRpcEndpointOptions {
+  /** The base URL of the RPC endpoint */
+  url: string;
+  /** Custom headers to inject (e.g., Authorization tokens). Supports dynamic async resolution. */
+  headers?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
+  /** Custom query parameters to append. Supports dynamic async resolution. */
+  query?: Record<string, string> | (() => Record<string, string> | Promise<Record<string, string>>);
+}
+
+export interface InternalRpcEndpoint {
+  url: string;
+  headers?: HttpRpcEndpointOptions["headers"];
+  query?: HttpRpcEndpointOptions["query"];
+  originalFormat: "string" | "object";
 }
 
 /**
  * Configuration options for the RPC class
  */
-export interface RPCConfig {
-  /** Blockchain chain ID in hex format (e.g., "0x0001") */
-  chainId: string;
+export interface RPCConfig<THttp = string, TWs = string> {
+  /** Blockchain chain ID (can be hex string "0x1", numeric string "1", or number 1) */
+  chainId: string | number;
   /** Time-to-live for RPC validation in seconds (default: 10) */
   ttl?: number;
   /** Maximum number of retries before dropping an RPC (default: 3) */
@@ -50,6 +65,8 @@ export interface RPCConfig {
   maxBackoffDelay?: number;
   /** Timeout for RPC validation calls in milliseconds (default: 5000) */
   validationTimeout?: number;
+  /** Time before a failed URL is completely reset in milliseconds (default: 21600000 / 6 hours) */
+  timeToResetFailedURL?: number;
   /**
    * Additional RPC URLs to merge into the base endpoint list.
    * Accepts HTTP and WebSocket URLs scoped to the instance's chainId.
@@ -58,7 +75,7 @@ export interface RPCConfig {
    * These extend (not replace) whatever base list is loaded.
    * @see CustomRpcs
    */
-  customRpcs?: CustomRpcs;
+  customRpcs?: CustomRpcs<THttp, TWs>;
   /**
    * Enforce HTTPS/WSS protocols for all endpoints.
    * When true, any non-secure endpoints (http://, ws://) will be silently ignored.
@@ -70,7 +87,32 @@ export interface RPCConfig {
    * This is used to enforce specific network policies like IPv4-only resolution.
    * Must be provided at construction if strict routing is required.
    */
-  agent?: any;
+  agent?: unknown;
+  /**
+   * Bring-your-own fetch adapter (e.g., Axios wrappers, custom network handlers).
+   *
+   * ⚠️ SECURITY WARNING: lazy-rpc achieves its un-crashable runtime defense by parsing
+   * raw, incoming byte streams incrementally. If you override fetchFn using traditional
+   * higher-level libraries like Axios or Superagent without stream-passthrough options,
+   * you will disable the maxPayloadBytes protection layer and allow full-payload buffering
+   * memory exploits. For proxy routing, prefer passing an Undici ProxyAgent into the
+   * native agent parameter instead.
+   */
+  fetchFn?: typeof fetch;
+  /** Maximum accepted RPC response/message payload size in bytes (default: 51200 - 50KB). */
+  maxPayloadBytes?: number;
+  /** Maximum parsed JSON nesting depth accepted from RPC endpoints (default: 5). */
+  maxPayloadDepth?: number;
+  /** Maximum total object key count accepted from a parsed RPC payload (default: 50). */
+  maxPayloadKeys?: number;
+  /** Maximum JSON array length accepted from RPC endpoints (default: 50). */
+  maxPayloadArrayLength?: number;
+  /** Maximum byte size for any single JSON string in an RPC payload (default: 1024). */
+  maxPayloadStringBytes?: number;
+  /** Require HTTP validation responses to declare an application/json content type (default: true). */
+  requireJsonContentType?: boolean;
+  /** Configurable error prefix for standardizing error tracking application wide (default: "LazyRpc"). */
+  errorPrefix?: string;
 }
 
 /**
@@ -79,16 +121,14 @@ export interface RPCConfig {
 export interface RPCDependencies {
   fetchFn: typeof fetch;
   websocketClass: typeof WebSocket;
-  agent?: any; // HTTP Agent for Node.js (undici)
-  chainList?: Record<string, string[]>; // Parsed JSON chain list
+  agent?: unknown;
+  chainList?: Record<string, string[]>;
 }
 
 /**
  * RPC endpoint with performance metrics
  */
-export interface RPCEndpoint {
-  /** The RPC URL */
-  url: string;
+export interface RPCEndpoint extends InternalRpcEndpoint {
   /** Response time in milliseconds */
   time: number;
 }
@@ -108,13 +148,11 @@ export interface FailedURLInfo {
 /**
  * RPC call result
  */
-export interface RPCCallResult {
+export interface RPCCallResult extends InternalRpcEndpoint {
   /** Response time in milliseconds */
   time: number;
   /** Type of RPC call */
   type: "ws" | "https";
-  /** The RPC URL that was called */
-  url: string;
 }
 
 /**

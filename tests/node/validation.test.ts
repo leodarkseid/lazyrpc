@@ -70,11 +70,10 @@ describe("Validation: False Positive 200 OK responses", () => {
         const promise = rpc.getRpcAsync("https");
 
         // All endpoints should fail validation gracefully, resulting in an empty valid list
-        await expect(promise).rejects.toThrow("Failed To Find A Valid RPC");
+        await expect(promise).rejects.toThrow("Failed to find a validated https RPC URL");
 
         // Ensure absolutely no endpoints were marked as actually valid
-        const validatedCount = rpc.getAllValidRPCs("https").filter(r => r.time < 999_999_999).length;
-        expect(validatedCount).toBe(0);
+        expect(rpc.getAllValidRPCs("https")).toHaveLength(0);
 
         rpc.destroy();
     });
