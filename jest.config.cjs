@@ -24,5 +24,17 @@ module.exports = {
         "^(\\.{1,2}/.*)\\.js$": "$1",
       },
     },
+    {
+      displayName: "unit",
+      testEnvironment: "node",
+      setupFiles: ["<rootDir>/jest.setup.cjs"],
+      testMatch: ["<rootDir>/tests/unit/**/*.test.ts"],
+      transform: {
+        "^.+\\.tsx?$": ["ts-jest", {}],
+      },
+      moduleNameMapper: {
+        "^(\\.{1,2}/.*)\\.js$": "$1",
+      },
+    },
   ],
 };

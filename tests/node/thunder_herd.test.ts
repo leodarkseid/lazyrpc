@@ -10,6 +10,14 @@ describe("URL Oracle: The Thundering Herd (Concurrent Boot Lock)", () => {
 
     let httpServers: http.Server[] = [];
     let wsServers: WebSocketServer[] = [];
+    let activeRpcs: RPC[] = [];
+
+    afterEach(() => {
+        for (const rpc of activeRpcs) {
+            rpc.destroy();
+        }
+        activeRpcs = [];
+    });
 
     let httpUrls: Record<string, string> = {};
     let wsUrls: Record<string, string> = {};
@@ -47,8 +55,8 @@ describe("URL Oracle: The Thundering Herd (Concurrent Boot Lock)", () => {
         // --- 2. SETUP WEBSOCKET SERVERS ---
         const createWsServer = (name: keyof typeof wsCallCounts, delay: number) => {
             return new Promise<string>((resolve) => {
-                const wss = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
-                wss.on('connection', (ws) => {
+                const wss: any = new WebSocketServer({ port: 0 }, () => resolve(`ws://127.0.0.1:${(wss.address() as any).port}`));
+                wss.on('connection', (ws: any) => {
                     ws.on('message', (message: any) => {
                         wsCallCounts[name]++; // Increment the tracker!
                         const parsed = JSON.parse(message.toString());
@@ -89,11 +97,14 @@ describe("URL Oracle: The Thundering Herd (Concurrent Boot Lock)", () => {
             for (const client of ws.clients ?? []) client.terminate();
             await new Promise<void>(resolve => ws.close(() => resolve()));
         }
+
+        jest.useRealTimers();
     });
 
     test("HTTP: 50 concurrent requests trigger exactly ONE network validation", async () => {
         httpCallCounts = { A: 0, B: 0, C: 0 };
-        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, ttl: 60 });
+        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, ttl: 60, enforceHttps: false });
+        activeRpcs.push(rpc);
 
         // Fire 50 requests at the EXACT SAME TIME
         const promises = [];
@@ -115,12 +126,12 @@ describe("URL Oracle: The Thundering Herd (Concurrent Boot Lock)", () => {
         expect(httpCallCounts.B).toBe(1);
         expect(httpCallCounts.C).toBe(1);
 
-        rpc.destroy();
     });
 
     test("WebSocket: 50 concurrent requests trigger exactly ONE network validation", async () => {
         wsCallCounts = { X: 0, Y: 0, Z: 0 };
-        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, ttl: 60 });
+        const rpc = new RPC({ chainId: "0x1", pathToRpcJson: jsonPath, ttl: 60, enforceHttps: false });
+        activeRpcs.push(rpc);
 
         // Fire 50 requests at the EXACT SAME TIME
         const promises = [];
@@ -141,6 +152,5 @@ describe("URL Oracle: The Thundering Herd (Concurrent Boot Lock)", () => {
         expect(wsCallCounts.Y).toBe(1);
         expect(wsCallCounts.Z).toBe(1);
 
-        rpc.destroy();
     });
 });

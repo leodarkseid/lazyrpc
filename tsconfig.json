@@ -12,11 +12,22 @@
       "jest",
       "node"
     ],
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "exactOptionalPropertyTypes": true,
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
   },
   "include": [
     "src/**/*",
-    "rpcList.json"
+    "rpcList.json",
   ],
   "exclude": [
     "node_modules",
