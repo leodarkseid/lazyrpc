@@ -7,8 +7,7 @@
     "test": "eslint . && tsc --noEmit && jest --runInBand --forceExit",
     "build": "tsup src/index.ts src/browser.ts --format cjs,esm --dts --clean --minify --shims && cp src/rpcList.min.json dist/",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit",
-    "prepare": "husky"
+    "typecheck": "tsc --noEmit"
   },
   "repository": {
     "type": "git",

@@ -317,7 +317,7 @@ export class RPCBase<THttp = string, TWs = string> {
             results.push(result.value);
           } else {
             const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
-            this.#config.logger.warn(`[${this.#config.errorPrefix}: 'RPC Base'] Validation Warning: Endpoint failed to pass validation checks. Reason: ${errorMessage}`);
+            this.#config.logger.warn(`[${this.#config.errorPrefix}: 'RPC Base'] Validation Warning: Endpoint ${req.endpoint.url} failed to pass validation checks. Reason: ${errorMessage}`);
             validationErrors.push({ type: req.type, message: errorMessage });
           }
         }
