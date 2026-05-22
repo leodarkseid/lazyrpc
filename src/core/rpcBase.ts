@@ -63,6 +63,20 @@ export class RPCBase<THttp = string, TWs = string> {
   #baseWsUrls: InternalRpcEndpoint[] = [];
   #id = 0;
 
+  #exitHandler = (): void => {
+    void this.destroy();
+  };
+
+  #signalHandler = (signal: string): void => {
+    void this.destroy();
+    
+    if (typeof process !== "undefined" && typeof process.listenerCount === "function" && typeof process.kill === "function") {
+      if (process.listenerCount(signal) === 0) {
+        process.kill(process.pid, signal);
+      }
+    }
+  };
+
   #getRpcAsyncQueue = new Set<{
     type: RPCType,
     resolve: (url: THttp | TWs) => void,
@@ -76,6 +90,12 @@ export class RPCBase<THttp = string, TWs = string> {
     this.#config = buildInternalConfig(config, deps);
     this.#loadBalancing = this.#config.loadBalancing;
     this.#health = new EndpointHealthManager(this.#config);
+
+    if (typeof process !== "undefined" && typeof process.on === "function") {
+      process.on("exit", this.#exitHandler);
+      process.on("SIGINT", this.#signalHandler);
+      process.on("SIGTERM", this.#signalHandler);
+    }
 
     try {
       const urls = resolveBaseUrls(
@@ -228,6 +248,11 @@ export class RPCBase<THttp = string, TWs = string> {
 
     this.#isDestroyed = true;
     this.#abortController.abort();
+    if (typeof process !== "undefined" && typeof process.removeListener === "function") {
+      process.removeListener("exit", this.#exitHandler);
+      process.removeListener("SIGINT", this.#signalHandler);
+      process.removeListener("SIGTERM", this.#signalHandler);
+    }
     if (this.#refreshTimer) {
       clearTimeout(this.#refreshTimer);
       this.#refreshTimer = null;
