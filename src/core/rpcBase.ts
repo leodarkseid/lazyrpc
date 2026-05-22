@@ -129,13 +129,13 @@ export class RPCBase<THttp = string, TWs = string> {
     }
 
     this.#config.logger.debug(`[${this.#config.errorPrefix}: 'RPC Base'] Selected ${type} RPC URL: ${selected.url}`);
-    
+
     if (selected.originalFormat === "string") {
       return selected.url as unknown as THttp | TWs;
     }
-    
-    return { 
-      url: selected.url, 
+
+    return {
+      url: selected.url,
       ...(selected.headers ? { headers: cloneConfigPayload(selected.headers) } : {}),
       ...(selected.query ? { query: cloneConfigPayload(selected.query) } : {})
     } as unknown as THttp | TWs;
@@ -284,6 +284,8 @@ export class RPCBase<THttp = string, TWs = string> {
       return;
     }
 
+    const validationErrors: { type: RPCType, message: string }[] = [];
+
     try {
       const allUrls: { endpoint: InternalRpcEndpoint; type: RPCType }[] = [
         ...this.#baseHttpUrls.map((endpoint) => ({ endpoint, type: "https" as const })),
@@ -305,12 +307,18 @@ export class RPCBase<THttp = string, TWs = string> {
 
 
 
-        for (const result of batchResults) {
+        for (let j = 0; j < batch.length; j++) {
+          const req = batch[j];
+          const result = batchResults[j];
+          if (!req || !result) continue;
+
           if (result.status === "fulfilled") {
             this.drainQueueFor(result.value);
             results.push(result.value);
           } else {
-            this.#config.logger.warn(`[${this.#config.errorPrefix}: 'RPC Base'] Validation Warning: Endpoint failed to pass validation checks. Reason:`, result.reason);
+            const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason);
+            this.#config.logger.warn(`[${this.#config.errorPrefix}: 'RPC Base'] Validation Warning: Endpoint failed to pass validation checks. Reason: ${errorMessage}`);
+            validationErrors.push({ type: req.type, message: errorMessage });
           }
         }
       }
@@ -337,7 +345,9 @@ export class RPCBase<THttp = string, TWs = string> {
 
         for (const entry of this.#getRpcAsyncQueue) {
           if (entry.timer) { clearTimeout(entry.timer); }
-          entry.reject(new LazyRpcError(`Failed to find a validated ${entry.type} RPC URL during this validation cycle`, "RPC Base", this.#config.errorPrefix));
+          const relevantErrors = validationErrors.filter(e => e.type === entry.type).map(e => e.message);
+          const errStr = relevantErrors.length > 0 ? ` Reasons: ${relevantErrors.join(" | ")}` : "";
+          entry.reject(new LazyRpcError(`Failed to find a validated ${entry.type} RPC URL during this validation cycle.${errStr}`, "RPC Base", this.#config.errorPrefix));
         }
         this.#getRpcAsyncQueue.clear();
       }

@@ -341,6 +341,30 @@ describe("core/rpcBase", () => {
     await rpc.destroy();
   });
 
+  test("validation cycle propagates specific failure reasons upwards to getRpcAsync callers", async () => {
+    const customErrorMessage = "Special injected mock error for payload size";
+    const failingFetch = jest.fn(async () => { throw new Error(customErrorMessage); });
+    
+    const rpc = new RPCBase({ chainId: "0x1", enforceHttps: false }, makeDeps({
+      fetchFn: failingFetch as any,
+      chainList: { x0001: ["https://failing.example"] },
+    }));
+
+    const queued = rpc.getRpcAsync("https", 30_000);
+    
+    const assertion = expect(queued).rejects.toThrow(
+      `Failed to find a validated https RPC URL during this validation cycle. Reasons: ${customErrorMessage}`
+    );
+
+    for (let i = 0; i < 20; i++) {
+      await jest.advanceTimersByTimeAsync(10);
+    }
+    
+    await assertion;
+
+    await rpc.destroy();
+  });
+
   // ─── Batched validation ───────────────────────────────────────────
 
   test("validation batches candidates in groups of 10", async () => {
