@@ -59,9 +59,9 @@ export interface RPCConfig<THttp = string, TWs = string> {
   log?: boolean | Logger;
   /** Load balancing strategy (default: "fastest") */
   loadBalancing?: "fastest" | "round-robin" | "random";
-  /** Exponential backoff base delay in milliseconds (default: 30000) */
+  /** Exponential backoff base delay in milliseconds (default: 1800000 / 30 minutes) */
   baseBackoffDelay?: number;
-  /** Maximum backoff delay in milliseconds (default: 300000) */
+  /** Maximum backoff delay in milliseconds (default: 3600000 / 1 hour) */
   maxBackoffDelay?: number;
   /** Timeout for RPC validation calls in milliseconds (default: 5000) */
   validationTimeout?: number;

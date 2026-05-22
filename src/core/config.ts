@@ -110,8 +110,8 @@ export function buildInternalConfig<THttp = string, TWs = string>(
 
     logger: logger,
     loadBalancing: config.loadBalancing ?? "fastest",
-    baseBackoffDelay: config.baseBackoffDelay ?? 30000,
-    maxBackoffDelay: config.maxBackoffDelay ?? 300000,
+    baseBackoffDelay: config.baseBackoffDelay ?? 1800000,
+    maxBackoffDelay: config.maxBackoffDelay ?? 3600000,
     validationTimeout: config.validationTimeout ?? 5000,
     enforceHttps: config.enforceHttps ?? true,
     timeToResetFailedURL: config.timeToResetFailedURL ?? 6 * 60 * 60 * 1000,

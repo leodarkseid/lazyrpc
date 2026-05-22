@@ -328,8 +328,8 @@ interface RPCConfig<THttp = string, TWs = string> {
   
   // Advanced Timing & Failure Tolerances
   validationTimeout?: number;       // Optional: Timeout for validation pings in ms (default: 5000)
-  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 30000)
-  maxBackoffDelay?: number;         // Optional: Max penalty ms for failing endpoints (default: 300000)
+  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 1800000 / 30 minutes)
+  maxBackoffDelay?: number;         // Optional: Max penalty ms for failing endpoints (default: 3600000 / 1 hour)
   timeToResetFailedURL?: number;    // Optional: How long until an endpoint's failure score resets (default: 6 hours)
 
   // Strict Routing & Network Security
@@ -561,10 +561,10 @@ Lazy RPC's architecture ensures that your application is shielded from failing n
 
 ### Smart Exponential Backoff
 Failed RPCs are stripped from the active pool and automatically paced in a backoff queue to stop thundering-herd API thrashing:
-- 1st failure: 30 second sleep
-- 2nd failure: 60 second sleep
-- 3rd failure: 120 second sleep
-- Max: 5 minutes
+- 1st failure: 30 minute sleep
+- 2nd failure: 1 hour sleep (capped at max)
+- 3rd failure: permanently dropped from rotation
+- Max backoff: 1 hour
 
 Failed RPCs completely reset after 6 hours, allowing for node recovery from protracted outages natively.
 
