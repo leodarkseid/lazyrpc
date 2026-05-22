@@ -49,7 +49,7 @@ export interface InternalRpcEndpoint {
 export interface RPCConfig<THttp = string, TWs = string> {
   /** Blockchain chain ID (can be hex string "0x1", numeric string "1", or number 1) */
   chainId: string | number;
-  /** Time-to-live for RPC validation in seconds (default: 10) */
+  /** Time-to-live for RPC validation in seconds (default: 1200 / 20 minutes) */
   ttl?: number;
   /** Maximum number of retries before dropping an RPC (default: 3) */
   maxRetry?: number;
@@ -59,7 +59,7 @@ export interface RPCConfig<THttp = string, TWs = string> {
   log?: boolean | Logger;
   /** Load balancing strategy (default: "fastest") */
   loadBalancing?: "fastest" | "round-robin" | "random";
-  /** Exponential backoff base delay in milliseconds (default: 2000) */
+  /** Exponential backoff base delay in milliseconds (default: 30000) */
   baseBackoffDelay?: number;
   /** Maximum backoff delay in milliseconds (default: 300000) */
   maxBackoffDelay?: number;

@@ -14,10 +14,10 @@ describe("core/config", () => {
 
       expect(internal).toMatchObject({
         chainId: "x0001",
-        ttl: 10,
+        ttl: 1200,
         maxRetry: 3,
         loadBalancing: "fastest",
-        baseBackoffDelay: 2_000,
+        baseBackoffDelay: 30_000,
         maxBackoffDelay: 300_000,
         validationTimeout: 5_000,
         enforceHttps: true,

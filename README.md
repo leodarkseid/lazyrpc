@@ -319,7 +319,7 @@ const rpc = new RPC({
 ```typescript
 interface RPCConfig<THttp = string, TWs = string> {
   chainId: string | number;           // Required: Blockchain chain ID (e.g. "0x0001", "137", or 137)
-  ttl?: number;                      // Optional: Refresh interval in seconds (1-3600, default: 10)
+  ttl?: number;                      // Optional: Refresh interval in seconds (1-3600, default: 1200 / 20 minutes)
   maxRetry?: number;                 // Optional: Max retries before dropping (0-10, default: 3)
   pathToRpcJson?: string;           // Optional: Custom RPC list file path (Node.js only, replaces built-in list)
   customRpcs?: CustomRpcs<THttp, TWs>; // Optional: Additional RPCs to merge into the base list
@@ -328,7 +328,7 @@ interface RPCConfig<THttp = string, TWs = string> {
   
   // Advanced Timing & Failure Tolerances
   validationTimeout?: number;       // Optional: Timeout for validation pings in ms (default: 5000)
-  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 2000)
+  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 30000)
   maxBackoffDelay?: number;         // Optional: Max penalty ms for failing endpoints (default: 300000)
   timeToResetFailedURL?: number;    // Optional: How long until an endpoint's failure score resets (default: 6 hours)
 
@@ -561,10 +561,10 @@ Lazy RPC's architecture ensures that your application is shielded from failing n
 
 ### Smart Exponential Backoff
 Failed RPCs are stripped from the active pool and automatically paced in a backoff queue to stop thundering-herd API thrashing:
-- 1st failure: 1 second sleep
-- 2nd failure: 2 second sleep
-- 3rd failure: 4 second sleep
-- Max: 60 seconds
+- 1st failure: 30 second sleep
+- 2nd failure: 60 second sleep
+- 3rd failure: 120 second sleep
+- Max: 5 minutes
 
 Failed RPCs completely reset after 6 hours, allowing for node recovery from protracted outages natively.
 
