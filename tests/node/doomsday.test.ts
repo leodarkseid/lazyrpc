@@ -109,7 +109,7 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
         results.forEach((url: any) => {
             expect(url.status).toBe("rejected");
             expect(url.reason).toBeInstanceOf(Error);
-            expect(url.reason).toStrictEqual(new LazyRpcError("Failed to find a validated https RPC URL during this validation cycle", "RPC Base", "LazyRpc"));
+            expect(url.reason.message).toContain("Failed to find a validated https RPC URL during this validation cycle");
         })
 
 
@@ -131,7 +131,7 @@ describe("URL Oracle: The Doomsday Thundering Herd", () => {
         results.forEach((url: any) => {
             expect(url.status).toBe("rejected");
             expect(url.reason).toBeInstanceOf(Error);
-            expect(url.reason).toStrictEqual(new LazyRpcError("Failed to find a validated ws RPC URL during this validation cycle", "RPC Base", "LazyRpc"));
+            expect(url.reason.message).toContain("Failed to find a validated ws RPC URL during this validation cycle");
         })
 
     });

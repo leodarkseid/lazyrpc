@@ -5,21 +5,32 @@
 
 ## Overview
 
-LAZY RPC is a robust, lightweight, and production-ready library designed to securely manage and validate Remote Procedure Call (RPC) URLs for blockchain interactions. Built from the ground up to guarantee extremely fast resolution, it provides massive performance gains, a very low memory footprint, and maximum compatibility in both **Node.js and Browser environments**.
+LAZY RPC was built to solve a critical problem in Web3 development: **making blockchain interactions cheaper and more reliable**. 
 
-Crucially, Lazy RPC is highly secure but completely non-obstructive. Its background processing is intelligent enough to sample endpoints, apply smart exponential backoff, and load balance your API usage—meaning it will **never** clog your network queue or cause visible spikes in your CPU/memory usage. It seamlessly guarantees strict endpoint correctness while remaining entirely invisible to your hot path.
+Free public RPC nodes are notoriously unstable and heavily rate-limited. Relying on just one or two often leads to throttled requests, forcing developers to pay for expensive premium RPC subscriptions or third-party SaaS aggregators. 
 
-## Why Lazy RPC? Performance & Architecture
+**LAZY RPC is a lightweight, native endpoint aggregator that runs directly in your server or client.** Unlike a proxy that intercepts your network traffic, LAZY RPC simply sits in the background, continuously validating, ranking, and managing a massive pool of free public endpoints. When your application needs to make a blockchain call, it instantly hands you a fast, fresh, and working URL to use. This allows you to aggressively utilize free infrastructure without hitting rate limits—drastically reducing your operating costs while avoiding the single point of failure and latency overhead of centralized providers.
 
-Under the hood, Lazy RPC utilizes distinct architectural paths depending on your environment to maximize efficiency:
-- **Node.js Environment**: Bypasses heavy W3C Web Standards by dynamically routing connections through a highly-tuned [Undici](https://undici.nodejs.org/) socket pool. Our benchmarks against native Node `fetch` demonstrate:
-  - **~20% Higher Throughput** (Requests per second)
-  - **~65% Less Memory Bloat** (Uses nearly 3x less RAM, preventing GC spikes)
-  - **Massive Latency Reductions**: p99 tail latency improved by 43.6%, standardizing network jitter. (p95 improved by 43.8%, p90 by 37.49%, and p50 by 2.34%)
-- **Browser Environment**: Gracefully falls back to the native `window.fetch` and `window.WebSocket` endpoints for lightweight, zero-dependency deployment and maximum compatibility. In the browser, custom RPC configurations can be imported directly and passed into the instance, bypassing `pathToRpcJson`.
+Not only does it manage public nodes out-of-the-box, but it also gives you the flexibility to **add your own private RPCs** (like Infura or Alchemy) to the mix, acting as your ultimate fallback mechanism. 
 
-### Producer / Consumer Architecture
+Behind the scenes, its strict **Producer/Consumer architecture** continuously monitors endpoint health—ensuring every node in its active pool is **working and fully synced**. It provides massive performance gains, a very low memory footprint, and maximum compatibility in both **Node.js and Browser environments**.
 
+Crucially, Lazy RPC is highly secure but completely non-obstructive. Its background processing is intelligent enough to sample endpoints, apply smart exponential backoff, and manage URL rotation—meaning it will **never** clog your network queue or cause visible spikes in your CPU/memory usage. It seamlessly guarantees strict endpoint correctness while remaining entirely invisible to your hot path.
+
+## Why Lazy RPC?
+
+**1. Plug and Play: Bundled & Custom RPCs**
+You don't need to hunt for RPC URLs. Lazy RPC comes bundled with verified public endpoints for 15+ major EVM chains out-of-the-box. Just instantiate it with your desired `chainId` and immediately start requesting fast, working URLs. Have your own premium RPCs (like Infura or Alchemy), or need to support a bespoke blockchain? You can effortlessly provide your own nodes to be managed alongside the bundled ones. 
+
+**2. The "Invisible" Architecture (Zero Memory Bloat)**
+Managing dozens of RPC endpoints requires continuously pinging them in the background. Standard polling loops bloat memory, cause GC spikes, and drag down the Node.js event loop—competing directly with your application. Lazy RPC bypasses heavy Web APIs entirely in Node.js. By default, it executes its background validation pings using a highly-tuned [Undici](https://undici.nodejs.org/) socket pool and incrementally parses raw byte-streams. 
+- **The Result:** It uses **~65% less RAM** than standard `fetch` implementations, completely eliminating GC spikes.
+- **Highly Configurable:** While the defaults are heavily optimized, the validation layer is completely network-agnostic. You can configure it down to the exact network `Agent`, inject custom proxies, or bring your own `fetch` wrapper.
+
+**3. Bulletproof Security by Default**
+Public RPC nodes are untrusted territory. Lazy RPC inherently protects your application from malicious endpoints. With zero configuration, you are automatically shielded against malicious payload injection, Out-Of-Memory (OOM) attacks from gargantuan JSON blobs, Regex Denial of Service (ReDoS), and Prototype Pollution. 
+
+**4. Lightning-Fast Producer/Consumer Separation**
 Lazy RPC uses a strict **producer/consumer** separation internally:
 
 - **Producer** (`initialize()`) — Runs in the background as soon as the instance is constructed. It validates RPC URLs in batches of 10, testing each with an `eth_blockNumber` call and measuring latency. Valid endpoints are sorted by speed and placed into the consumer pool. This runs on a configurable TTL cycle to continuously refresh the pool.
@@ -31,13 +42,16 @@ Lazy RPC uses a strict **producer/consumer** separation internally:
 
 This separation means that even with 10,000 candidate URLs, consumers never wait for the full validation sweep — they get results as soon as the first batch validates.
 
+**5. Zero-Overhead Browser Fallback**
+When running in the browser, Lazy RPC gracefully falls back to the native `window.fetch` and `window.WebSocket` endpoints for a lightweight, zero-dependency deployment that maximizes compatibility without bloating your bundle size. In the browser, custom RPC configurations can be imported directly and passed into the instance, bypassing `pathToRpcJson`.
+
 ## Features
 
 - ✅ **Architectural Dual-Support**: Maximum compatibility natively tailored for both Node.js (via Undici) and browsers (via native `fetch`/`WebSocket`).
 - ✅ **Producer/Consumer Model**: Background validation feeds a ready pool — consumers never trigger I/O.
 - ✅ **Streaming Resolution**: `getRpcAsync()` resolves as soon as the first URL validates, not after the entire list.
 - ✅ **Lifecycle Awareness**: `status()` method tracks initialization → refreshing → ready → destroyed states.
-- ✅ **Extreme Performance**: Low memory footprint and lightning-fast connection resolution.
+- ✅ **Extreme Performance**: Low memory footprint and lightning-fast URL resolution.
 - ✅ **Memory Safety Toolkit**: While it's highly recommended to use the `.destroy()` method to clean up, the library pro-actively tries to clean up and garbage-collect hanging processes and dispatcher agents in Node.js automatically.
 - ✅ **Multi-Protocol Support**: HTTP and WebSocket RPC endpoints seamlessly mapped.
 - ✅ **Smart Failure Tracking**: Exponential backoff retry logic with automatic penalty tracking and recovery periods.
@@ -319,7 +333,7 @@ const rpc = new RPC({
 ```typescript
 interface RPCConfig<THttp = string, TWs = string> {
   chainId: string | number;           // Required: Blockchain chain ID (e.g. "0x0001", "137", or 137)
-  ttl?: number;                      // Optional: Refresh interval in seconds (1-3600, default: 10)
+  ttl?: number;                      // Optional: Refresh interval in seconds (1-3600, default: 1200 / 20 minutes)
   maxRetry?: number;                 // Optional: Max retries before dropping (0-10, default: 3)
   pathToRpcJson?: string;           // Optional: Custom RPC list file path (Node.js only, replaces built-in list)
   customRpcs?: CustomRpcs<THttp, TWs>; // Optional: Additional RPCs to merge into the base list
@@ -328,8 +342,8 @@ interface RPCConfig<THttp = string, TWs = string> {
   
   // Advanced Timing & Failure Tolerances
   validationTimeout?: number;       // Optional: Timeout for validation pings in ms (default: 5000)
-  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 2000)
-  maxBackoffDelay?: number;         // Optional: Max penalty ms for failing endpoints (default: 300000)
+  baseBackoffDelay?: number;        // Optional: Starting penalty ms for failing endpoints (default: 1800000 / 30 minutes)
+  maxBackoffDelay?: number;         // Optional: Max penalty ms for failing endpoints (default: 3600000 / 1 hour)
   timeToResetFailedURL?: number;    // Optional: How long until an endpoint's failure score resets (default: 6 hours)
 
   // Strict Routing & Network Security
@@ -392,12 +406,12 @@ const extendedRpc = new RPC({
 });
 ```
 
-### Custom Fetchers and Agents (Advanced Routing)
+### Custom Fetchers and Agents (For Background Validation)
 
-Lazy RPC's transport layer is completely stateless and network-agnostic, allowing you to completely override the underlying mechanism. This gives you maximum configurability to seamlessly plug in custom HTTP clients like Axios, provide unique Undici dispatchers, or enforce complex routing proxies.
+Lazy RPC's internal validation layer is completely stateless and network-agnostic. While LAZY RPC **does not** intercept your application's traffic, it does perform its own network requests to validate nodes in the background. This gives you maximum configurability to override the underlying mechanism used for these background pings, allowing you to seamlessly plug in custom HTTP clients like Axios, provide unique Undici dispatchers, or enforce complex routing proxies.
 
 #### 1. Injecting a Custom Agent or Dispatcher
-If you are operating in an environment with strict egress requirements (e.g. enforcing IPv4, routing through a corporate proxy, or using custom TLS certificates), you can provide your own network agent. The library will automatically attach it to all internal network calls.
+If you are operating in an environment with strict egress requirements (e.g. enforcing IPv4, routing through a corporate proxy, or using custom TLS certificates), you can provide your own network agent. The library will automatically attach it to all of its internal background validation calls.
 
 ```typescript
 import { RPC } from "lazy-rpc";
@@ -547,9 +561,9 @@ Manually triggers a re-validation cycle. The instance status transitions to `"re
 
 ## Load Balancing Strategies
 
-- **`fastest`** (Default): Analyzes connection latency during validation and explicitly routes requests directly to the fastest responding node.
-- **`round-robin`**: Evenly distributes calls sequentially wrapping through the validated endpoint list, useful for preventing single-node rate-limiting.
-- **`random`**: Distributes payloads natively across any validated endpoint using standard randomization.
+- **`fastest`** (Default): Analyzes connection latency during background validation and returns the URL of the fastest responding node.
+- **`round-robin`**: Evenly rotates the returned URLs sequentially through the validated endpoint list, useful for helping your application prevent single-node rate-limiting.
+- **`random`**: Randomly selects and returns a URL from the validated endpoint list.
 
 ## Error Prevention & Retry Logic
 
@@ -561,10 +575,10 @@ Lazy RPC's architecture ensures that your application is shielded from failing n
 
 ### Smart Exponential Backoff
 Failed RPCs are stripped from the active pool and automatically paced in a backoff queue to stop thundering-herd API thrashing:
-- 1st failure: 1 second sleep
-- 2nd failure: 2 second sleep
-- 3rd failure: 4 second sleep
-- Max: 60 seconds
+- 1st failure: 30 minute sleep
+- 2nd failure: 1 hour sleep (capped at max)
+- 3rd failure: permanently dropped from rotation
+- Max backoff: 1 hour
 
 Failed RPCs completely reset after 6 hours, allowing for node recovery from protracted outages natively.
 

@@ -105,13 +105,13 @@ export function buildInternalConfig<THttp = string, TWs = string>(
 
   const internal: _InternalRpcConfig = {
     chainId: parsedChainId,
-    ttl: config.ttl ?? 10,
+    ttl: config.ttl ?? 1200,
     maxRetry: config.maxRetry ?? 3,
 
     logger: logger,
     loadBalancing: config.loadBalancing ?? "fastest",
-    baseBackoffDelay: config.baseBackoffDelay ?? 2000,
-    maxBackoffDelay: config.maxBackoffDelay ?? 300000,
+    baseBackoffDelay: config.baseBackoffDelay ?? 1800000,
+    maxBackoffDelay: config.maxBackoffDelay ?? 3600000,
     validationTimeout: config.validationTimeout ?? 5000,
     enforceHttps: config.enforceHttps ?? true,
     timeToResetFailedURL: config.timeToResetFailedURL ?? 6 * 60 * 60 * 1000,
